@@ -17,6 +17,8 @@ def btn(at, label):
 def show(at, tag):
     print(f"== {tag}"); 
     for e in at.error: print("  ERROR:", e.value[:160].replace("\n"," | "))
+    for c in at.code:
+        if "종료 사유" in c.value or "API 오류" in c.value: print("  원인:", c.value.replace("\n"," || ")[:300])
     for w in at.warning: print("  WARN:", w.value[:200].replace("\n"," | "))
     for s in at.success: print("  OK:", s.value[:100])
     for i in at.info: print("  INFO:", i.value[:100])
@@ -25,7 +27,7 @@ def show(at, tag):
 at = new(); btn(at, "AI로 대본 만들기"); show(at, "빈 입력"); print("  AI 호출", len(fake.CALLS))
 # 2) 예시 + 정상
 at = new(); btn(at, "예시 제품으로 채우기"); btn(at, "AI로 대본 만들기"); show(at, "정상 생성")
-print("  제목:", [c.value for c in at.code][:3]); print("  장면표 행수:", len(at.dataframe[0].value))
+print("  제목:", [c.value for c in at.code][:3]); print("  장면표 있음:", "장면별 대본" in " ".join(m.value for m in at.markdown))
 # 3) 입력을 바꾸면 프롬프트도 바뀌는지 (AI에 실제로 입력이 전달되는지)
 import prompts
 p1 = prompts.script_prompt(dict(brand="A", name="말차", category="음료", price="9,000원", features=["x"], target="t", event="", seconds=30, scenes_hint=6, tone="감성적", style="공감형", banned=[], cta="c"))
@@ -35,9 +37,11 @@ fake.MODE["script"] = "bad"; at = new(); btn(at, "예시 제품으로 채우기"
 # 5) 개인정보 입력
 at = new(); btn(at, "예시 제품으로 채우기"); at.text_input(key="in_event").set_value("문의 010-1234-5678"); btn(at, "AI로 대본 만들기"); show(at, "개인정보 입력")
 # 6) API 오류들
-for f in (429, 401, "garbage"):
+for f in (429, 401, "garbage", "truncated", "empty", "fenced"):
     fake.MODE["fail"] = f; at = new(); btn(at, "예시 제품으로 채우기"); btn(at, "AI로 대본 만들기"); show(at, f"오류 {f}")
 fake.MODE["fail"] = 404; fake.CALLS.clear(); at = new(); btn(at, "예시 제품으로 채우기"); btn(at, "AI로 대본 만들기"); show(at, "모델 404 → 대체 모델"); print("  호출한 모델:", fake.CALLS)
+fake.MODE["fail"] = 503; fake.CALLS.clear(); at = new(); btn(at, "예시 제품으로 채우기"); btn(at, "AI로 대본 만들기"); show(at, "첫 모델 503 → 다른 모델"); print("  호출한 모델:", fake.CALLS)
+fake.MODE["fail"] = "allgone"; fake.CALLS.clear(); at = new(); btn(at, "예시 제품으로 채우기"); btn(at, "AI로 대본 만들기"); show(at, "기본 모델 전부 없음 → 목록 조회"); print("  호출한 모델:", fake.CALLS)
 fake.MODE["fail"] = None
 # 7) 키 없음
 import importlib

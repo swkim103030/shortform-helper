@@ -20,7 +20,8 @@ SCRIPT_SYSTEM = """당신은 소상공인·작은 브랜드를 돕는 숏폼(유
 3. 금지 표현 목록에 있는 단어는 쓰지 않는다.
 4. 나레이션은 성우가 그대로 읽는 문장이다. 괄호, 지시문(BGM, 장면:), 이모지, 해시태그를 넣지 않는다. 숫자와 기호는 읽기 쉽게 쓴다(예: 10% → 10퍼센트).
 5. 화면 문구(caption)는 16자 이내로 짧게.
-6. 결과는 지정한 JSON 형식으로만 답한다."""
+6. 장면마다 배경 영상을 찾을 영어 검색어(broll)를 2~5단어로 쓴다. 브랜드명·상표·유명인 이름은 넣지 않고, 화면에 보일 장면을 구체적으로 묘사한다(예: "iced coffee pouring glass", "busy office worker morning").
+7. 결과는 지정한 JSON 형식으로만 답한다."""
 
 
 def script_prompt(p):
@@ -43,7 +44,7 @@ def script_prompt(p):
 [JSON 형식]
 {{
   "titles": ["유튜브 제목 후보 3개, 각 40자 이내"],
-  "scenes": [{{"caption": "화면 문구", "narration": "나레이션"}}],
+  "scenes": [{{"caption": "화면 문구", "narration": "나레이션", "broll": "english stock video search words"}}],
   "description": "유튜브 설명란 (3~5줄)",
   "hashtags": ["#해시태그 5~8개"],
   "instagram": "같은 내용의 인스타그램 게시글 (줄바꿈 포함, 5~8줄)",

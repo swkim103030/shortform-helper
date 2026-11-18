@@ -3,8 +3,12 @@
 실행: streamlit run app.py
 필요한 비밀 설정 (.streamlit/secrets.toml 또는 Streamlit Cloud의 Secrets):
     GEMINI_API_KEY = "..."
-    GEMINI_MODEL = "gemini-flash-latest"   # 선택
+    GEMINI_MODEL = "gemini-3.8-flash"      # 선택
+    TEAM_PASSWORD = "..."                   # 팀 기능(유튜브 업로드·댓글 게시) 잠금 비밀번호
+    YOUTUBE_TOKEN = '''{ token.json 내용 }'''  # 업로드할 채널의 로그인 정보
 """
+import hashlib
+import hmac
 import json
 import time
 
@@ -12,13 +16,19 @@ import streamlit as st
 
 import ai
 import checks
+import stock
 import prompts
+import video
+import youtube
 
 st.set_page_config(page_title="숏폼 마케팅 도우미", page_icon="🎬", layout="centered")
 
 MAX_CALLS = 15            # 한 사람(세션)이 10분 동안 쓸 수 있는 AI 호출 수 (무료 한도 보호)
 WINDOW_SEC = 600
 MAX_COMMENTS = 15
+MAX_VIDEOS = 4            # 한 사람이 10분 동안 만들 수 있는 영상 수 (무료 서버 보호)
+PRIVACY = {"일부 공개 (링크 있는 사람만)": "unlisted", "비공개": "private", "공개": "public"}
+AI_NOTICE = "※ 이 영상의 대본과 음성은 AI로 만들었고, 담당자가 확인한 뒤 올렸습니다."
 SAMPLE = {
     "brand": "하루빈 커피", "name": "콜드브루 원액 500ml", "category": "커피", "price": "12,900원",
     "features": "18시간 저온 추출\n물이나 우유에 타기만 하면 완성\n냉장 2주 보관",
@@ -31,6 +41,10 @@ SAMPLE_COMMENTS = """우유랑 몇 대 몇으로 섞어요?
 
 ss = st.session_state
 ss.setdefault("calls", [])
+ss.setdefault("video_times", [])
+ss.setdefault("uploaded", {})
+ss.setdefault("posted", set())
+ss.setdefault("team_ok", False)
 for k, v in SAMPLE.items():
     ss.setdefault(f"in_{k}", "")
 
@@ -46,6 +60,30 @@ def allow_call():
     return True
 
 
+def _secret_value(name):
+    try:
+        return str(st.secrets.get(name, "") or "")
+    except Exception:
+        return ""
+
+
+def allow_video():
+    now = time.time()
+    ss.video_times = [t for t in ss.video_times if now - t < WINDOW_SEC]
+    if len(ss.video_times) >= MAX_VIDEOS:
+        st.warning("영상은 10분에 4개까지 만들 수 있어요. 잠시 뒤에 다시 시도해 주세요.")
+        return False
+    ss.video_times.append(now)
+    return True
+
+
+def show_ai_error(e):
+    st.error(f"😥 {e}")
+    if getattr(e, "detail", ""):
+        with st.expander("자세한 원인 (관리자용)"):
+            st.code(e.detail, language=None)
+
+
 def fill_sample():
     for k, v in SAMPLE.items():
         ss[f"in_{k}"] = v
@@ -58,12 +96,40 @@ with st.sidebar:
     cta = st.text_input("행동 유도 문구", "프로필 링크에서 확인하세요!", max_chars=40)
     banned_raw = st.text_input("금지 표현 (쉼표로 구분)", "최고, 1등, 무조건, 완벽", max_chars=200)
     banned = [w.strip() for w in banned_raw.split(",") if w.strip()]
+    st.subheader("🎥 영상 설정")
+    k1, k2 = st.columns(2)
+    color_main = k1.color_picker("배경색", "#6B3E26")
+    color_accent = k2.color_picker("강조색", "#F2B05E")
+    voice_name = st.selectbox("목소리", list(video.VOICES))
+    bg_options = ([f"스톡 영상 ({stock.provider()})"] if stock.configured() else []) + ["애니메이션 배경"]
+    bg_mode = st.radio("배경", bg_options, help="스톡 영상: 장면마다 AI가 만든 검색어로 무료 실사 영상을 찾아 깔아요.")
+    use_stock = bg_mode.startswith("스톡")
+    ai_label = st.checkbox("화면에 'AI 생성 영상' 표시", value=True)
+    st.divider()
+    st.subheader("🔑 팀 기능")
+    team_pw = _secret_value("TEAM_PASSWORD")
+    if not team_pw:
+        st.caption("유튜브 업로드·댓글 게시는 관리자가 팀 비밀번호를 설정해야 쓸 수 있어요.")
+    elif ss.team_ok:
+        st.success("팀 기능 사용 중 (유튜브 업로드·댓글 게시)")
+        if st.button("잠그기"):
+            ss.team_ok = False
+            st.rerun()
+    else:
+        pw = st.text_input("팀 비밀번호", type="password", help="유튜브 업로드와 댓글 게시는 팀원만 쓸 수 있어요.")
+        if pw:
+            if hmac.compare_digest(pw.encode(), team_pw.encode()):
+                ss.team_ok = True
+                st.rerun()
+            else:
+                st.error("비밀번호가 달라요.")
     st.divider()
     st.caption("🔒 개인정보(전화번호, 이메일, 주소 등)는 입력하지 마세요. 입력된 내용은 AI 처리를 위해 Google Gemini API로 전송됩니다.")
     st.caption("⚠️ AI 결과는 초안입니다. 게시 전에 사실과 표현을 꼭 확인하세요.")
 
 st.title("🎬 숏폼 마케팅 도우미")
-st.write("제품 정보를 넣으면 AI가 **쇼츠 대본, 제목, 해시태그, 인스타 글**을 만들고, **댓글 답글 초안**까지 써 드려요. "
+st.write("제품 정보를 넣으면 AI가 **쇼츠 대본**을 쓰고, 그 대본으로 **음성·자막이 들어간 쇼츠 영상**을 만들어요. "
+         "팀원은 확인한 영상을 **유튜브에 바로 올리고**, 채널 댓글에 **AI 답글**을 달 수 있어요. "
          "광고에 쓰면 위험한 표현은 자동으로 찾아 알려 드려요.")
 
 tab1, tab2, tab3 = st.tabs(["📝 쇼츠 대본 만들기", "💬 댓글 응대", "ℹ️ 사용 안내"])
@@ -103,14 +169,12 @@ with tab1:
                 try:
                     data, model = ai.generate_json(prompts.SCRIPT_SYSTEM, prompts.script_prompt(req),
                                                    ["titles", "scenes", "description", "hashtags", "instagram"])
-                    ss.script = {"data": data, "model": model, "req": req,
+                    ss.script = {"data": data, "model": model, "req": req, "id": int(time.time() * 1000),
+                                 "user_text": f"{user_text} {seconds}",
                                  "check": checks.check_script(data, f"{user_text} {seconds}", banned, seconds)}
                 except ai.AIError as e:
                     ss.pop("script", None)
-                    st.error(f"😥 {e}")
-                    if e.detail:
-                        with st.expander("자세한 원인 (관리자용)"):
-                            st.code(e.detail, language=None)
+                    show_ai_error(e)
 
     if "script" in ss:
         res, chk, req = ss.script["data"], ss.script["check"], ss.script["req"]
@@ -127,18 +191,31 @@ with tab1:
         for t in res.get("titles", [])[:3]:
             st.code(t, language=None)
 
-        st.markdown(f"**🎬 장면별 대본** · 예상 약 {chk['estimated_sec']:.0f}초")
-        rows = [{"장면": i + 1, "화면 문구": s.get("caption", ""), "나레이션": s.get("narration", "")}
-                for i, s in enumerate(res.get("scenes", []))]
-        st.dataframe(rows, hide_index=True, width="stretch")
+        st.markdown(f"**🎬 장면별 대본** · 예상 약 {chk['estimated_sec']:.0f}초 · 칸을 눌러 직접 고칠 수 있어요")
+        rows = [{"장면": i + 1, "화면 문구": s.get("caption", ""), "나레이션": s.get("narration", ""),
+                 "배경 검색어": s.get("broll", "")} for i, s in enumerate(res.get("scenes", []))]
+        edited = st.data_editor(rows, hide_index=True, width="stretch", disabled=["장면"],
+                                key=f"scenes_{ss.script['id']}")
+        rows = [{"장면": i + 1, "화면 문구": str(r.get("화면 문구") or "").strip(),
+                 "나레이션": str(r.get("나레이션") or "").strip(),
+                 "배경 검색어": str(r.get("배경 검색어") or "").strip()} for i, r in enumerate(edited)]
+        final = dict(res, scenes=[{"caption": r["화면 문구"], "narration": r["나레이션"], "broll": r["배경 검색어"]}
+                                  for r in rows])
+        changed = [(a["caption"], a["narration"]) for a in final["scenes"]] != \
+            [(b.get("caption", ""), b.get("narration", "")) for b in res.get("scenes", [])]
+        if changed:  # 사람이 고친 대본은 다시 검사
+            chk = checks.check_script(final, ss.script["user_text"], banned, req["seconds"])
+            st.caption("✏️ 고친 대본으로 다시 검사했어요." + (" 아래 문제를 확인해 주세요." if chk["errors"] else ""))
+            for e_ in chk["errors"]:
+                st.error(e_)
         if res.get("thumbnail_text"):
             st.markdown(f"**🖼️ 썸네일 문구:** {res['thumbnail_text']}")
 
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**📄 유튜브 설명란**")
-            st.text_area("설명", res.get("description", "") + "\n\n" + " ".join(res.get("hashtags", [])),
-                         height=180, label_visibility="collapsed")
+            desc = st.text_area("설명", res.get("description", "") + "\n\n" + " ".join(res.get("hashtags", [])),
+                                height=180, label_visibility="collapsed", key=f"desc_{ss.script['id']}")
         with c2:
             st.markdown("**📷 인스타그램 글**")
             st.text_area("인스타", res.get("instagram", ""), height=180, label_visibility="collapsed")
@@ -149,17 +226,140 @@ with tab1:
                          "[인스타그램]", res.get("instagram", "")])
         d1, d2 = st.columns(2)
         d1.download_button("⬇️ 텍스트로 받기", txt, file_name=f"{req['name']}_쇼츠대본.txt", width="stretch")
-        d2.download_button("⬇️ JSON으로 받기 (자동화 연동용)", json.dumps(res, ensure_ascii=False, indent=2),
+        d2.download_button("⬇️ JSON으로 받기 (자동화 연동용)", json.dumps(final, ensure_ascii=False, indent=2),
                            file_name=f"{req['name']}_script.json", width="stretch")
         st.caption(f"생성 모델: {ss.script['model']} · 같은 입력도 다시 누르면 다른 결과가 나와요.")
+
+        # ───── 영상 만들기 ─────
+        st.divider()
+        st.subheader("🎥 이 대본으로 영상 만들기")
+        st.caption("장면마다 AI 음성과 움직이는 자막을 입혀 세로 쇼츠(1080×1920) 영상을 만들어요. 1분 안팎 걸려요. "
+                   "색·목소리·배경은 왼쪽 설정에서 바꿀 수 있어요."
+                   + (" 배경은 표의 '배경 검색어'로 무료 스톡 영상을 찾아요." if use_stock else ""))
+        vkey = hashlib.sha1(json.dumps([final["scenes"], color_main, color_accent, voice_name, ai_label, use_stock,
+                                        req["brand"], req["name"]], ensure_ascii=False).encode()).hexdigest()[:12]
+        if st.button("🎬 영상 만들기", type="primary", width="stretch"):
+            if any(not sc["caption"] or not sc["narration"] for sc in final["scenes"]):
+                st.error("비어 있는 화면 문구나 나레이션이 있어요. 채운 뒤 다시 눌러 주세요.")
+            elif allow_video():
+                bar = st.progress(0.0, "준비 중...")
+                try:
+                    mp4, info = video.make_video(final, dict(req, cta=cta.strip()),
+                                                 {"primary": color_main, "accent": color_accent},
+                                                 video.VOICES[voice_name], ai_label,
+                                                 progress=lambda p, m: bar.progress(min(1.0, p), m),
+                                                 stock=use_stock)
+                    ss.video = {"key": vkey, "mp4": mp4, "info": info, "script_id": ss.script["id"]}
+                except Exception as e:
+                    ss.pop("video", None)
+                    st.error(f"😥 영상을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({type(e).__name__})")
+                    with st.expander("자세한 원인 (관리자용)"):
+                        st.code(str(e)[:800], language=None)
+                bar.empty()
+
+        vid = ss.get("video")
+        if vid and vid["script_id"] == ss.script["id"]:
+            info = vid["info"]
+            if vid["key"] != vkey:
+                st.info("대본이나 설정을 바꿨어요. 바뀐 내용을 반영하려면 '영상 만들기'를 다시 눌러 주세요.")
+            if use_stock and info.get("stock_scenes", 0) < info["scenes"]:
+                st.info(f"배경 영상을 {info.get('stock_scenes', 0)}/{info['scenes']}개 장면에서 찾았어요. "
+                        "못 찾은 장면은 애니메이션 배경이에요. '배경 검색어'를 바꿔 다시 만들어 볼 수 있어요.")
+            if info.get("silent_scenes"):
+                st.warning(f"음성 서버 연결이 불안정해서 {info['silent_scenes']}개 장면이 무음으로 만들어졌어요. 다시 만들어 보세요.")
+            left, right = st.columns([3, 2])
+            with left:
+                st.video(vid["mp4"])
+            with right:
+                st.metric("영상 길이", f"{info['seconds']:.0f}초")
+                st.metric("장면 수", info["scenes"])
+                st.caption(f"만드는 데 {info['elapsed']:.0f}초 걸렸어요.")
+                if info.get("credits"):
+                    names = ", ".join(dict.fromkeys(c["author"] for c in info["credits"] if c["author"]))
+                    src = ", ".join(dict.fromkeys(c.get("source", "") for c in info["credits"]))
+                    st.caption(f"🎞️ 배경 영상: {src} 무료 영상 (촬영: {names})")
+                st.download_button("⬇️ 영상(mp4) 받기", vid["mp4"], file_name=f"{req['name']}_shorts.mp4",
+                                   mime="video/mp4", width="stretch")
+
+            # ───── 유튜브 업로드 (팀 전용) ─────
+            st.markdown("#### 📤 유튜브에 올리기")
+            if not ss.team_ok:
+                st.caption("🔒 유튜브 업로드는 팀원만 쓸 수 있어요. 왼쪽 '팀 기능'에 비밀번호를 넣어 주세요. "
+                           "영상은 위에서 받아 직접 올릴 수도 있어요.")
+            elif not youtube.configured():
+                st.warning("유튜브 계정이 아직 연결되지 않았어요. (관리자: Secrets에 YOUTUBE_TOKEN 추가)")
+            elif vid["key"] in ss.uploaded:
+                u = ss.uploaded[vid["key"]]
+                st.success(f"업로드 완료! https://youtu.be/{u['id']} ({u['privacy']})")
+            else:
+                with st.form(f"upload_{vid['key']}"):
+                    titles = res.get("titles", [])[:3] or [req["name"]]
+                    title = st.selectbox("제목", titles)
+                    credit = ""
+                    if info.get("credits"):
+                        names = ", ".join(dict.fromkeys(c["author"] for c in info["credits"] if c["author"]))
+                        src = ", ".join(dict.fromkeys(c.get("source", "") for c in info["credits"]))
+                        credit = f"\n배경 영상: {src} (촬영: {names})"
+                    up_desc = st.text_area("설명란", (desc + "\n\n" + AI_NOTICE + credit).strip(), height=150,
+                                           max_chars=4900)
+                    privacy = st.radio("공개 범위", list(PRIVACY), horizontal=True)
+                    agree = st.checkbox("영상과 문구를 직접 확인했고, 사실과 다르거나 과장된 내용이 없음을 확인했어요.")
+                    send = st.form_submit_button("📤 유튜브에 올리기", type="primary", width="stretch")
+                if send:
+                    if not agree:
+                        st.error("올리기 전에 내용을 확인했다는 칸에 체크해 주세요. (사람 확인 없이 자동으로 올리지 않아요)")
+                    elif chk["errors"]:
+                        st.error("대본에 '꼭 고쳐야 할 점'이 남아 있어서 올릴 수 없어요. 위 장면 표에서 고친 뒤 영상을 다시 만들어 주세요.")
+                    elif info.get("silent_scenes"):
+                        st.error("음성이 빠진 장면이 있는 영상은 올리지 않아요. 영상을 다시 만들어 주세요.")
+                    elif vid["key"] != vkey:
+                        st.error("지금 대본·설정과 영상이 달라요. '영상 만들기'를 다시 누른 뒤 올려 주세요.")
+                    else:
+                        with st.spinner("유튜브에 올리는 중... (1분 정도)"):
+                            try:
+                                yt = youtube.client()
+                                tags = [h for h in res.get("hashtags", []) if isinstance(h, str)]
+                                vid_id, real = youtube.upload(yt, vid["mp4"], title, up_desc + "\n\n#Shorts", tags,
+                                                              PRIVACY[privacy])
+                                ss.uploaded[vid["key"]] = {"id": vid_id, "privacy": real}
+                                st.rerun()
+                            except youtube.YTError as e:
+                                st.error(f"😥 {e}")
+                            except Exception as e:
+                                st.error(f"😥 업로드에 실패했어요. ({type(e).__name__})")
+                st.caption("ℹ️ 학생용(미검수) 구글 프로젝트라 유튜브가 영상을 '비공개'로 바꿀 수 있어요.")
 
 # ───────── 탭 2: 댓글 응대 ─────────
 with tab2:
     st.write("영상에 달린 댓글을 **한 줄에 하나씩** 붙여 넣으세요. AI가 분류하고 답글 초안을 써요. "
              "**불만·민감 댓글은 AI가 답하지 않고 담당자에게 넘겨요.**")
-    if st.button("예시 댓글로 채우기"):
+    b1, b2 = st.columns(2)
+    if b1.button("예시 댓글로 채우기", width="stretch"):
         ss.comments_in = SAMPLE_COMMENTS
         ss.c_brand = ss.get("in_brand") or SAMPLE["brand"]
+        ss.pop("yt_threads", None)
+    if ss.team_ok and youtube.configured():
+        if b2.button("📥 내 채널 새 댓글 불러오기", width="stretch"):
+            try:
+                with st.spinner("채널 댓글을 불러오는 중..."):
+                    yt = youtube.client()
+                    ch = youtube.channel(yt)
+                    threads = youtube.recent_comments(yt, ch, MAX_COMMENTS)
+                if not threads:
+                    st.info(f"'{ch['title']}' 채널에 아직 답하지 않은 새 댓글이 없어요.")
+                else:
+                    lines = [" ".join(t["text"].split())[:300] for t in threads]
+                    ss.comments_in = "\n".join(lines)
+                    ss.yt_threads = {"lines": lines, "threads": threads, "channel": ch["title"]}
+                    ss.c_brand = ss.get("c_brand") or ss.get("in_brand") or ch["title"]
+                    ss.pop("replies", None)
+                    st.rerun()
+            except youtube.YTError as e:
+                st.error(f"😥 {e}")
+    else:
+        b2.caption("🔒 팀원은 내 유튜브 채널 댓글을 바로 불러와 답글까지 게시할 수 있어요.")
+    if ss.get("yt_threads"):
+        st.caption(f"📺 '{ss.yt_threads['channel']}' 채널에서 불러온 댓글 {len(ss.yt_threads['lines'])}개")
     ss.setdefault("c_brand", ss.get("in_brand") or "")
     with st.form("comment_form"):
         cbrand = st.text_input("브랜드 이름 *", key="c_brand", max_chars=30)
@@ -176,19 +376,17 @@ with tab2:
             masked = [checks.mask_personal(c) for c in comments]  # 개인정보는 가리고 AI에 보냄
             if masked != comments:
                 st.info("댓글 속 전화번호·이메일 등은 가린 뒤 AI에 보냈어요.")
+            linked = bool(ss.get("yt_threads")) and comments == ss.yt_threads["lines"]
             with st.spinner("AI가 댓글을 읽고 있어요..."):
                 try:
                     data, model = ai.generate_json(prompts.COMMENT_SYSTEM,
                                                    prompts.comment_prompt(cbrand, tone, cinfo, banned, masked),
                                                    ["items"], temperature=0.4)
                     ss.replies = {"items": checks.enforce_comment_rules(data.get("items", []), masked, banned),
-                                  "model": model}
+                                  "model": model, "threads": ss.yt_threads["threads"] if linked else None}
                 except ai.AIError as e:
                     ss.pop("replies", None)
-                    st.error(f"😥 {e}")
-                    if e.detail:
-                        with st.expander("자세한 원인 (관리자용)"):
-                            st.code(e.detail, language=None)
+                    show_ai_error(e)
 
     if "replies" in ss:
         items = ss.replies["items"]
@@ -208,7 +406,25 @@ with tab2:
                 elif it["category"] == "스팸":
                     st.caption("답글을 달지 않아요. 플랫폼에서 숨김·신고를 권장해요.")
                 else:
-                    st.text_area("답글 초안", it["reply"], key=f"reply_{n}", height=80)
+                    text = st.text_area("답글 초안", it["reply"], key=f"reply_{n}", height=80)
+                    threads = ss.replies.get("threads") or []
+                    th = threads[n - 1] if n - 1 < len(threads) else None
+                    if th and ss.team_ok:
+                        if th["thread_id"] in ss.posted:
+                            st.success("유튜브에 답글을 달았어요.")
+                        elif st.button("✅ 확인했어요, 이 답글 게시", key=f"post_{n}"):
+                            problems = checks.risky_terms(text, banned) or checks.find_personal(text)
+                            if not text.strip():
+                                st.error("답글이 비어 있어요.")
+                            elif problems:
+                                st.error("답글에 주의 표현이나 개인정보가 있어서 게시하지 않았어요. 고친 뒤 다시 눌러 주세요.")
+                            else:
+                                try:
+                                    youtube.reply(youtube.client(), th["thread_id"], text.strip())
+                                    ss.posted.add(th["thread_id"])
+                                    st.rerun()
+                                except youtube.YTError as e:
+                                    st.error(f"😥 {e}")
                 for note in it["notes"]:
                     st.caption(f"⚠️ {note}")
         st.caption(f"생성 모델: {ss.replies['model']} · 답글은 꼭 확인한 뒤 게시하세요.")
@@ -221,13 +437,17 @@ with tab3:
 
 ### 무엇을 해 주나요
 - **쇼츠 대본:** 장면별 화면 문구와 나레이션, 제목 후보, 설명란, 해시태그, 인스타 글
-- **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안
+- **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요
+- **유튜브 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란에 AI 제작 사실을 적어요
+- **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 채널 댓글을 불러와 확인 후 게시
 - **자동 검사:** 금지 표현, 효능·과장 표현, 입력에 없는 숫자(AI가 지어낸 수치일 가능성)
 
 ### 안전장치
 - 불만·민감 댓글에는 AI가 답글을 쓰지 않아요. AI가 규칙을 어겨도 화면에서 한 번 더 걸러요.
 - 입력에 전화번호·이메일이 있으면 대본은 생성을 막고, 댓글은 가린 뒤 AI에 보내요.
-- AI 키는 서버에만 보관되고 화면이나 코드에 나오지 않아요.
+- AI 키와 유튜브 로그인 정보는 서버에만 보관되고 화면이나 코드에 나오지 않아요.
+- 유튜브 업로드·답글 게시는 팀 비밀번호가 있어야 하고, 매번 사람이 눌러야만 실행돼요.
+- 영상 화면에 'AI 생성 영상' 표시를 기본으로 넣어요.
 - 짧은 시간에 너무 많이 요청하면 잠시 쉬게 해요.
 
 ### 한계
