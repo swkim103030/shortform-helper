@@ -108,6 +108,9 @@ with tab1:
                 except ai.AIError as e:
                     ss.pop("script", None)
                     st.error(f"😥 {e}")
+                    if e.detail:
+                        with st.expander("자세한 원인 (관리자용)"):
+                            st.code(e.detail, language=None)
 
     if "script" in ss:
         res, chk, req = ss.script["data"], ss.script["check"], ss.script["req"]
@@ -183,6 +186,9 @@ with tab2:
                 except ai.AIError as e:
                     ss.pop("replies", None)
                     st.error(f"😥 {e}")
+                    if e.detail:
+                        with st.expander("자세한 원인 (관리자용)"):
+                            st.code(e.detail, language=None)
 
     if "replies" in ss:
         items = ss.replies["items"]
