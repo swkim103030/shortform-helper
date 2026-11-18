@@ -10,7 +10,9 @@ import re
 import time
 
 # 앞의 모델이 없으면(404) 다음 모델로 넘어간다
-DEFAULT_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest"]
+DEFAULT_MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+# 위 모델이 모두 없으면, 계정에서 쓸 수 있는 flash 모델 목록을 직접 조회해서 시도한다
+SKIP_WORDS = ("image", "tts", "audio", "live", "embedding", "vision")
 MAX_OUTPUT_TOKENS = 16384  # 최신 모델은 '생각하는 분량'도 여기에 포함되므로 넉넉하게
 
 
@@ -72,6 +74,26 @@ def _text(resp):
         return ""
 
 
+def _discover(client, tried):
+    """키로 쓸 수 있는 텍스트 생성용 flash 모델 이름을 찾는다 (정식 → preview → lite 순)."""
+    found = []
+    try:
+        for m in client.models.list():
+            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            actions = getattr(m, "supported_actions", None) or []
+            if not name or name in tried or "flash" not in name:
+                continue
+            if actions and "generateContent" not in actions:
+                continue
+            if any(w in name for w in SKIP_WORDS):
+                continue
+            found.append(name)
+    except Exception:
+        return []
+    rank = lambda n: ("lite" in n, "preview" in n or "exp" in n, -len(n))
+    return sorted(found, key=rank)[:4]
+
+
 def generate_json(system, prompt, required_keys, temperature=0.9, _client_factory=None):
     """Gemini에 JSON 형식 결과를 요청한다. 반환: (dict, 사용한 모델 이름)"""
     from google.genai import errors, types
@@ -84,7 +106,15 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
         max_output_tokens=MAX_OUTPUT_TOKENS,
     )
     log = []  # 시도 기록 (화면의 '자세한 원인'에 표시)
-    for model in _models():
+    models = _models()
+    discovered = False
+    i = 0
+    while i < len(models):
+        model = models[i]
+        i += 1
+        if i == len(models) and not discovered:  # 마지막 후보까지 왔으면 목록 조회로 보충
+            discovered = True
+            models += _discover(client, set(models))
         for attempt in range(2):  # 형식이 깨졌거나 일시 오류면 한 번 더
             try:
                 resp = client.models.generate_content(model=model, contents=prompt, config=config)
