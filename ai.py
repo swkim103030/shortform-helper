@@ -105,6 +105,7 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
         temperature=temperature,
         max_output_tokens=MAX_OUTPUT_TOKENS,
     )
+    busy = False  # 붐빔(429/503) 때문에 넘어간 모델이 있었는지
     log = []  # 시도 기록 (화면의 '자세한 원인'에 표시)
     models = _models()
     discovered = False
@@ -126,12 +127,12 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
                     break
                 if code in (401, 403) or (code == 400 and "key" in msg.lower()):
                     raise AIError("AI 키가 올바르지 않습니다. 관리자에게 문의해 주세요.", "\n".join(log)) from None
-                if code == 429:
-                    raise AIError("지금 요청이 많아 AI가 잠시 쉬는 중이에요. 1분쯤 뒤에 다시 시도해 주세요.",
-                                  "\n".join(log)) from None
-                if code and code >= 500 and attempt == 0:
-                    time.sleep(1.5)
+                if code and code >= 500 and attempt == 0:  # 일시 오류는 잠깐 쉬고 한 번 더
+                    time.sleep(2)
                     continue
+                if code == 429 or (code and code >= 500):  # 붐비거나 한도 초과 → 다른 모델로
+                    busy = True
+                    break
                 raise AIError(f"AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요. (오류 코드 {code})",
                               "\n".join(log)) from None
             except AIError:
@@ -151,4 +152,6 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
                 log.append(f"{model}: 결과 해석 실패 ({type(e).__name__}: {str(e)[:60]}) · 종료 사유 {reason} · "
                            f"받은 글자 수 {len(text)}")
                 continue
+    if busy:
+        raise AIError("지금 AI 사용자가 많아 잠시 붐벼요. 1분쯤 뒤에 다시 시도해 주세요.", "\n".join(log))
     raise AIError("AI 결과를 정리하지 못했습니다. 입력을 조금 바꿔 다시 시도해 주세요.", "\n".join(log))
