@@ -44,7 +44,10 @@ def _client():
     if not key:
         raise AIError("AI 키가 설정되지 않았습니다. 관리자에게 문의해 주세요. (Secrets에 GEMINI_API_KEY 필요)")
     from google import genai
-    return genai.Client(api_key=key)
+    from google.genai import types
+    # 한 번 호출이 40초를 넘기면 끊고, SDK 자체 재시도는 끈다(재시도는 아래에서 직접 관리)
+    return genai.Client(api_key=key, http_options=types.HttpOptions(
+        timeout=40_000, retry_options=types.HttpRetryOptions(attempts=1)))
 
 
 def _parse_json(text):
@@ -91,7 +94,7 @@ def _discover(client, tried):
     except Exception:
         return []
     rank = lambda n: ("lite" in n, "preview" in n or "exp" in n, -len(n))
-    return sorted(found, key=rank)[:4]
+    return sorted(found, key=rank)[:6]
 
 
 def generate_json(system, prompt, required_keys, temperature=0.9, _client_factory=None):
@@ -110,7 +113,12 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
     models = _models()
     discovered = False
     i = 0
+    start = time.time()
     while i < len(models):
+        if time.time() - start > 75:  # 전체 대기 시간 상한
+            log.append("시간 초과로 중단")
+            busy = True
+            break
         model = models[i]
         i += 1
         if i == len(models) and not discovered:  # 마지막 후보까지 왔으면 목록 조회로 보충
@@ -127,9 +135,6 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
                     break
                 if code in (401, 403) or (code == 400 and "key" in msg.lower()):
                     raise AIError("AI 키가 올바르지 않습니다. 관리자에게 문의해 주세요.", "\n".join(log)) from None
-                if code and code >= 500 and attempt == 0:  # 일시 오류는 잠깐 쉬고 한 번 더
-                    time.sleep(2)
-                    continue
                 if code == 429 or (code and code >= 500):  # 붐비거나 한도 초과 → 다른 모델로
                     busy = True
                     break
@@ -139,6 +144,9 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
                 raise
             except Exception as e:  # 네트워크 문제 등
                 log.append(f"{model}: 연결 오류 {type(e).__name__}")
+                if "timeout" in type(e).__name__.lower():  # 응답이 너무 느림 → 다른 모델로
+                    busy = True
+                    break
                 raise AIError("AI 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", "\n".join(log)) from e
 
             text, reason = _text(resp), _finish_reason(resp)
