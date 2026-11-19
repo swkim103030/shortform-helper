@@ -158,6 +158,12 @@ with st.sidebar:
     st.caption("🔒 개인정보(전화번호, 이메일, 주소 등)는 입력하지 마세요. 입력된 내용은 AI 처리를 위해 Google Gemini API로 전송됩니다.")
     st.caption("⚠️ AI 결과는 초안입니다. 게시 전에 사실과 표현을 꼭 확인하세요.")
 
+st.markdown("""<style>
+@media (max-width: 640px) {
+  h1 { font-size: 1.8rem !important; word-break: keep-all; }
+  h2, h3 { font-size: 1.3rem !important; }
+}
+</style>""", unsafe_allow_html=True)
 st.title("🎬 숏폼 마케팅 도우미")
 st.write("제품 정보를 넣으면 AI가 **쇼츠 대본**을 쓰고, 그 대본으로 **음성·자막이 들어간 쇼츠 영상**을 만들어요. "
          "팀원은 확인한 영상을 **유튜브에 바로 올리고**, 채널 댓글에 **AI 답글**을 달 수 있어요. "
@@ -201,8 +207,8 @@ with tab1:
                     data, model = ai.generate_json(prompts.SCRIPT_SYSTEM, prompts.script_prompt(req),
                                                    ["titles", "scenes", "description", "hashtags", "instagram"])
                     ss.script = {"data": data, "model": model, "req": req, "id": int(time.time() * 1000),
-                                 "user_text": f"{user_text} {seconds}",
-                                 "check": checks.check_script(data, f"{user_text} {seconds}", banned, seconds)}
+                                 "user_text": f"{user_text} {seconds}초",
+                                 "check": checks.check_script(data, f"{user_text} {seconds}초", banned, seconds)}
                 except ai.AIError as e:
                     ss.pop("script", None)
                     show_ai_error(e)
@@ -222,11 +228,15 @@ with tab1:
         for t in res.get("titles", [])[:3]:
             st.code(t, language=None)
 
-        st.markdown(f"**🎬 장면별 대본** · 예상 약 {chk['estimated_sec']:.0f}초 · 칸을 눌러 직접 고칠 수 있어요")
+        st.markdown(f"**🎬 장면별 대본** · 예상 약 {chk['estimated_sec']:.0f}초 · 칸을 눌러 직접 고칠 수 있어요 (휴대폰은 표를 옆으로 밀어 보세요)")
         rows = [{"장면": i + 1, "화면 문구": s.get("caption", ""), "나레이션": s.get("narration", ""),
                  "배경 검색어": s.get("broll", "")} for i, s in enumerate(res.get("scenes", []))]
-        edited = st.data_editor(rows, hide_index=True, width="stretch", disabled=["장면"],
-                                key=f"scenes_{ss.script['id']}")
+        edited = st.data_editor(
+            rows, hide_index=True, width="stretch", disabled=["장면"], key=f"scenes_{ss.script['id']}",
+            column_config={"장면": st.column_config.NumberColumn(width="small"),
+                           "화면 문구": st.column_config.TextColumn(width="medium", max_chars=30),
+                           "나레이션": st.column_config.TextColumn(width="large", max_chars=200),
+                           "배경 검색어": st.column_config.TextColumn(width="medium", max_chars=60)})
         rows = [{"장면": i + 1, "화면 문구": str(r.get("화면 문구") or "").strip(),
                  "나레이션": str(r.get("나레이션") or "").strip(),
                  "배경 검색어": str(r.get("배경 검색어") or "").strip()} for i, r in enumerate(edited)]
@@ -265,7 +275,7 @@ with tab1:
         st.divider()
         st.subheader("🎥 이 대본으로 영상 만들기")
         st.caption("장면마다 AI 음성과 움직이는 자막을 입혀 세로 쇼츠(1080×1920) 영상을 만들어요. 1분 안팎 걸려요. "
-                   "색·목소리·배경은 왼쪽 설정에서 바꿀 수 있어요."
+                   "색·목소리·배경은 설정 메뉴(휴대폰은 왼쪽 위 »)에서 바꿀 수 있어요."
                    + (" 배경은 표의 '배경 검색어'로 무료 스톡 영상을 찾아요." if use_stock else ""))
         ups = st.file_uploader(
             "📷 내 제품 사진·영상 넣기 (선택)", type=["jpg", "jpeg", "png", "webp", "mp4", "mov"],
@@ -336,7 +346,7 @@ with tab1:
             # ───── 유튜브 업로드 (팀 전용) ─────
             st.markdown("#### 📤 유튜브에 올리기")
             if not ss.team_ok:
-                st.caption("🔒 유튜브 업로드는 팀원만 쓸 수 있어요. 왼쪽 '팀 기능'에 비밀번호를 넣어 주세요. "
+                st.caption("🔒 유튜브 업로드는 팀원만 쓸 수 있어요. 설정 메뉴(휴대폰은 왼쪽 위 »)의 '팀 기능'에 비밀번호를 넣어 주세요. "
                            "영상은 위에서 받아 직접 올릴 수도 있어요.")
             elif not youtube.configured():
                 st.warning("유튜브 계정이 아직 연결되지 않았어요. (관리자: Secrets에 YOUTUBE_TOKEN 추가)")
@@ -445,9 +455,8 @@ with tab2:
         icon = {"문의": "❓", "칭찬": "😊", "불만": "⚠️", "민감": "🚫", "스팸": "🗑️"}
         counts = {c: sum(1 for it in items if it["category"] == c) for c in checks.CATEGORIES}
         st.divider()
-        cols = st.columns(5)
-        for col, c in zip(cols, checks.CATEGORIES):
-            col.metric(f"{icon[c]} {c}", counts[c])
+        # 휴대폰에서도 한 줄로 보이도록 표 대신 배지로 표시
+        st.markdown("  ".join(f"**{icon[c]} {c} {counts[c]}**" for c in checks.CATEGORIES))
         for n, it in enumerate(items, 1):
             with st.container(border=True):
                 st.markdown(f"**{icon[it['category']]} {it['category']}** · {it['comment']}")

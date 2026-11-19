@@ -52,7 +52,7 @@ ai2._client = lambda: fake.Client()
 at = new(); btn(at, "예시 댓글로 채우기")
 at.text_area(key="comments_in").set_value(at.session_state["comments_in"] + "\n제 번호 010-9999-8888로 연락 주세요")
 [b for b in at.button if "분류하고" in b.label][0].click().run(); assert not at.exception, at.exception
-show(at, "댓글"); print("  지표:", [(m.label, m.value) for m in at.metric])
+show(at, "댓글"); print("  지표:", [m.value for m in at.markdown if "문의" in m.value][:1])
 print("  답글칸:", [t.value[:25] for t in at.text_area if t.key and t.key.startswith('reply_')])
 print("  캡션:", [c.value[:50] for c in at.caption if '숨겼' in c.value or '가림' in c.value])
 # 9) 호출 제한

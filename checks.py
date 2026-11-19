@@ -34,6 +34,18 @@ def numbers(text):
     return {n.replace(",", "") for n in re.findall(r"\d[\d,]*", text or "")}
 
 
+UNIT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(퍼센트|%|초|분|시간|일|주|개월|달|년|배|명|잔|개|병|회|ml|mL|L|g|kg|원|만원)")
+
+
+def quantities(text):
+    """'10초', '1분', '10퍼센트' → {('10','초'), ('1','분'), ('10','%')} 숫자와 단위 쌍"""
+    out = set()
+    for num, unit in UNIT_RE.findall(text or ""):
+        unit = {"퍼센트": "%", "mL": "ml", "달": "개월"}.get(unit, unit)
+        out.add((num.replace(",", ""), unit))
+    return out
+
+
 def find_personal(text):
     return [name for name, rx in PERSONAL.items() if rx.search(text or "")]
 
@@ -89,6 +101,13 @@ def check_script(result, user_input_text, banned=(), target_sec=30):
     invented = sorted(n for n in numbers(all_text) - known if not (len(n) == 1 and n != "0"))
     if invented:
         warnings.append("입력에 없는 숫자가 있어요: " + ", ".join(invented[:6]) + " — AI가 지어낸 수치인지 확인하세요.")
+    # '10초 만에', '1분 완성'처럼 숫자는 입력에 있어도 단위가 다르면 지어낸 주장일 수 있다
+    known_q = quantities(user_input_text)
+    new_q = sorted(f"{n}{u}" for n, u in quantities(all_text) - known_q
+                   if f"{n}" not in invented)  # 위에서 이미 경고한 숫자는 중복 경고하지 않음
+    if new_q:
+        warnings.append("입력에 없는 수치 표현이 있어요: " + ", ".join(new_q[:6])
+                        + " — '10초 만에', '1분 완성'처럼 근거 없는 주장인지 확인하세요.")
 
     sec = sum(len(re.sub(r"\s", "", str(s.get("narration", "")))) * SEC_PER_CHAR + 0.35 for s in scenes)
     if sec > target_sec * 1.4:
