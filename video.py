@@ -29,6 +29,8 @@ def plan_scenes(scenes, req):
             kind = "hook"
         elif i == n - 1:
             d = _digits(cap)
+            if not d and price_digits:  # 마지막 장면엔 가격을 크게 보여 준다 (나레이션은 그대로)
+                cap, d = req["price"].strip(), price_digits
             kind = "price" if (not d or d == price_digits) else "event"
         elif i == 1:
             kind = "intro"
@@ -53,7 +55,25 @@ def fallback_query(req):
     return "lifestyle product"
 
 
-def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=False):
+def photo_order(n):
+    """내 사진을 넣을 장면 순서: 제품 소개 → 마지막(가격) → 특징들 → 첫 장면"""
+    order = [1, n - 1] + list(range(2, n - 1)) + [0]
+    seen = []
+    for i in order:
+        if 0 <= i < n and i not in seen:
+            seen.append(i)
+    return seen
+
+
+def assign_photos(n, photos):
+    """장면 수 n, 사진 경로 목록 → 장면별 사진(없으면 None)"""
+    slots = [None] * n
+    for i, p in zip(photo_order(n), photos):
+        slots[i] = p
+    return slots
+
+
+def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=False, photos=None):
     """mp4 바이트와 정보(dict)를 돌려준다. progress(비율 0~1, 문구)로 진행 상황을 알린다."""
     scenes = plan_scenes(script.get("scenes", []), req)
     if not scenes:
@@ -71,12 +91,24 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
             voices.append(path)
             durations.append(sec)
         scene_media, credits = None, []
-        if stock:
-            import stock
+        mine = []
+        for k, (name, data) in enumerate(photos or []):  # 사용자가 올린 사진·영상 (임시 폴더에만 저장)
+            path = tmp / f"mine_{k:02d}{Path(name).suffix.lower()}"
+            path.write_bytes(data)
+            mine.append(path)
+        mine_slots = assign_photos(len(scenes), mine) if mine else [None] * len(scenes)
+        need = [i for i, m in enumerate(mine_slots) if m is None]
+        stock_slots = [None] * len(scenes)
+        if stock and need:
+            import stock as stock_mod
             say(0.3, "배경 영상 찾는 중...")
-            scene_media, credits = stock.fetch_backgrounds(
-                [s["broll"] or fallback_query(req) for s in scenes], tmp, fallback_query(req),
+            got, credits = stock_mod.fetch_backgrounds(
+                [scenes[i]["broll"] or fallback_query(req) for i in need], tmp, fallback_query(req),
                 progress=lambda k, m: say(0.3 + 0.15 * k / m, f"배경 영상 찾는 중 ({k + 1}/{m})"))
+            for i, g in zip(need, got):
+                stock_slots[i] = g
+        if mine or stock:
+            scene_media = [m or s_ for m, s_ in zip(mine_slots, stock_slots)]
         brand = {"name": req["brand"], "cta": req.get("cta", ""), "tagline": "",
                  "colors": {"primary": colors["primary"], "accent": colors["accent"]},
                  "ai_label": "AI 생성 영상" if ai_label else ""}
@@ -95,6 +127,6 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
         data = out.read_bytes()
         thumb = (tmp / "scene_00.png").read_bytes() if (tmp / "scene_00.png").exists() else None
     info.update(silent_scenes=failed, scenes=n, elapsed=time.time() - started, thumbnail=thumb, credits=credits,
-                stock_scenes=sum(1 for m in (scene_media or []) if m))
+                stock_scenes=sum(1 for m in stock_slots if m), photo_scenes=sum(1 for m in mine_slots if m))
     say(1.0, "완성!")
     return data, info

@@ -41,9 +41,10 @@ PIXABAY_API = "https://pixabay.com/api/videos/"
 
 def search_pixabay(query, key, used=(), per_page=10):
     """Pixabay는 세로 검색 옵션이 없어서 세로 영상을 먼저 고르고, 없으면 가로 영상(가운데를 세로로 잘라 씀)"""
-    q = urllib.parse.urlencode({"key": key, "q": query[:100], "per_page": per_page, "safesearch": "true",
+    q = urllib.parse.urlencode({"key": key, "q": query[:100], "per_page": 20, "safesearch": "true",
                                 "video_type": "film"})
     hits = _get_json(f"{PIXABAY_API}?{q}", None).get("hits", [])
+    words = [w for w in query.lower().split() if len(w) > 2]
     best = []
     for h in hits:
         if h.get("id") in used or not (3 <= h.get("duration", 0) <= 60):
@@ -55,13 +56,15 @@ def search_pixabay(query, key, used=(), per_page=10):
         portrait = files[0]["height"] > files[0]["width"]
         files.sort(key=lambda f: -f["height"])  # 큰 해상도부터 (크기 제한 안에서)
         f = files[0]
-        best.append((not portrait, f["height"] < 1080, {
+        tags = (h.get("tags") or "").lower()
+        match = sum(1 for w in words if w in tags)
+        best.append((-match, not portrait, f["height"] < 1080, {
             "id": h["id"], "url": f["url"], "width": f["width"], "height": f["height"],
             "author": h.get("user", ""), "page": h.get("pageURL", ""), "source": "Pixabay"}))
     if not best:
         return None
-    best.sort(key=lambda b: (b[0], b[1]))  # 세로 우선, 1080 이상 우선 (그 안에서는 검색 순위 유지)
-    return best[0][2]
+    best.sort(key=lambda b: b[:3])  # 태그가 검색어와 많이 겹치는 것 → 세로 → 1080 이상 (그 안에서는 검색 순위)
+    return best[0][3]
 
 
 def _get_json(url, key):

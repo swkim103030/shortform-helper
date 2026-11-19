@@ -26,6 +26,8 @@ st.set_page_config(page_title="숏폼 마케팅 도우미", page_icon="🎬", la
 MAX_CALLS = 15            # 한 사람(세션)이 10분 동안 쓸 수 있는 AI 호출 수 (무료 한도 보호)
 WINDOW_SEC = 600
 MAX_COMMENTS = 15
+MAX_PHOTOS = 8            # 영상에 넣을 내 사진·영상 최대 개수
+PHOTO_MB = 40             # 파일 하나 최대 크기(MB)
 MAX_VIDEOS = 4            # 한 사람이 10분 동안 만들 수 있는 영상 수 (무료 서버 보호)
 PRIVACY = {"일부 공개 (링크 있는 사람만)": "unlisted", "비공개": "private", "공개": "public"}
 AI_NOTICE = "※ 이 영상의 대본과 음성은 AI로 만들었고, 담당자가 확인한 뒤 올렸습니다."
@@ -236,7 +238,26 @@ with tab1:
         st.caption("장면마다 AI 음성과 움직이는 자막을 입혀 세로 쇼츠(1080×1920) 영상을 만들어요. 1분 안팎 걸려요. "
                    "색·목소리·배경은 왼쪽 설정에서 바꿀 수 있어요."
                    + (" 배경은 표의 '배경 검색어'로 무료 스톡 영상을 찾아요." if use_stock else ""))
+        ups = st.file_uploader(
+            "📷 내 제품 사진·영상 넣기 (선택)", type=["jpg", "jpeg", "png", "webp", "mp4", "mov"],
+            accept_multiple_files=True, key=f"photos_{ss.script['id']}",
+            help=f"올린 순서대로 제품 소개 → 가격 → 특징 → 첫 장면에 들어가요. 최대 {MAX_PHOTOS}개, 파일당 {PHOTO_MB}MB. "
+                 "영상을 만들 때만 쓰고 서버에 저장하지 않아요.")
+        photos = []
+        for f in (ups or [])[:MAX_PHOTOS]:
+            if f.size > PHOTO_MB * 1024 * 1024:
+                st.warning(f"'{f.name}'은(는) {PHOTO_MB}MB가 넘어서 빼고 만들어요.")
+                continue
+            photos.append((f.name, f.getvalue()))
+        if ups and len(ups) > MAX_PHOTOS:
+            st.warning(f"사진·영상은 {MAX_PHOTOS}개까지만 써요. 앞의 {MAX_PHOTOS}개만 넣을게요.")
+        if photos:
+            slots = video.assign_photos(len(final["scenes"]), [n for n, _ in photos])
+            plan = " · ".join(f"장면 {i + 1}: {name}" for i, name in enumerate(slots) if name)
+            st.caption(f"📷 {plan}" + (" (나머지 장면은 스톡 영상)" if use_stock and len(photos) < len(slots) else ""))
+        photo_sig = [hashlib.sha1(d).hexdigest()[:8] for _, d in photos]
         vkey = hashlib.sha1(json.dumps([final["scenes"], color_main, color_accent, voice_name, ai_label, use_stock,
+                                        photo_sig,
                                         req["brand"], req["name"]], ensure_ascii=False).encode()).hexdigest()[:12]
         if st.button("🎬 영상 만들기", type="primary", width="stretch"):
             if any(not sc["caption"] or not sc["narration"] for sc in final["scenes"]):
@@ -248,7 +269,7 @@ with tab1:
                                                  {"primary": color_main, "accent": color_accent},
                                                  video.VOICES[voice_name], ai_label,
                                                  progress=lambda p, m: bar.progress(min(1.0, p), m),
-                                                 stock=use_stock)
+                                                 stock=use_stock, photos=photos)
                     ss.video = {"key": vkey, "mp4": mp4, "info": info, "script_id": ss.script["id"]}
                 except Exception as e:
                     ss.pop("video", None)
@@ -262,8 +283,8 @@ with tab1:
             info = vid["info"]
             if vid["key"] != vkey:
                 st.info("대본이나 설정을 바꿨어요. 바뀐 내용을 반영하려면 '영상 만들기'를 다시 눌러 주세요.")
-            if use_stock and info.get("stock_scenes", 0) < info["scenes"]:
-                st.info(f"배경 영상을 {info.get('stock_scenes', 0)}/{info['scenes']}개 장면에서 찾았어요. "
+            if use_stock and info.get("stock_scenes", 0) + info.get("photo_scenes", 0) < info["scenes"]:
+                st.info(f"배경 영상을 {info.get('stock_scenes', 0)}/{info['scenes'] - info.get('photo_scenes', 0)}개 장면에서 찾았어요. "
                         "못 찾은 장면은 애니메이션 배경이에요. '배경 검색어'를 바꿔 다시 만들어 볼 수 있어요.")
             if info.get("silent_scenes"):
                 st.warning(f"음성 서버 연결이 불안정해서 {info['silent_scenes']}개 장면이 무음으로 만들어졌어요. 다시 만들어 보세요.")
@@ -273,6 +294,8 @@ with tab1:
             with right:
                 st.metric("영상 길이", f"{info['seconds']:.0f}초")
                 st.metric("장면 수", info["scenes"])
+                if info.get("photo_scenes"):
+                    st.caption(f"📷 내 사진·영상 {info['photo_scenes']}개 장면 사용")
                 st.caption(f"만드는 데 {info['elapsed']:.0f}초 걸렸어요.")
                 if info.get("credits"):
                     names = ", ".join(dict.fromkeys(c["author"] for c in info["credits"] if c["author"]))
@@ -437,7 +460,7 @@ with tab3:
 
 ### 무엇을 해 주나요
 - **쇼츠 대본:** 장면별 화면 문구와 나레이션, 제목 후보, 설명란, 해시태그, 인스타 글
-- **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요
+- **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요. 배경은 무료 스톡 영상이나 **내 제품 사진·영상**을 써요
 - **유튜브 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란에 AI 제작 사실을 적어요
 - **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 채널 댓글을 불러와 확인 후 게시
 - **자동 검사:** 금지 표현, 효능·과장 표현, 입력에 없는 숫자(AI가 지어낸 수치일 가능성)

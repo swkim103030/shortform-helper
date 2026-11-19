@@ -9,6 +9,7 @@
 
 프레임은 Pillow로 그리고 ffmpeg에 바로 흘려보내 인코딩한다.
 """
+import re
 import math
 import os
 import random
@@ -278,7 +279,7 @@ def build_scene(kind, scene, feat_no, product, brand, col):
             lines, fnt, _ = fit_lines(cap, 150, W - 160, 2)
             els.append(El(text_sprite(lines, fnt, col["accent"] + (255,)), CX, 820, 0.15, "pop", 0.45))
         cta = brand.get("cta", "").rstrip("!").strip()
-        if cta:
+        if cta and not same_text(cap, cta):  # 큰 글씨와 같은 말이면 버튼은 생략
             lines, fnt, _ = fit_lines(cta, 56, W - 260, 2, min_size=44)
             els.append(El(card_sprite(lines, fnt, (255, 255, 255, 255), col["dark"] + (255,), 60, 36),
                           CX, 1080, 1.2, "pop", 0.45, pulse=True))
@@ -380,11 +381,23 @@ class GradientBG:
         pass
 
 
+def same_text(a, b):
+    """두 문구가 사실상 같은 말인지 (띄어쓰기·문장부호 무시, 짧은 쪽 글자의 70% 이상이 겹치면)"""
+    a, b = (re.sub(r"[^0-9A-Za-z가-힣]", "", x) for x in (a, b))
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return sum(1 for ch in short if ch in long_) / len(short) >= 0.7
+
+
 class ImageBG:
     """사진 배경: 천천히 확대되는 효과"""
 
     def __init__(self, path, shade):
-        im = Image.open(path).convert("RGB")
+        from PIL import ImageOps
+        im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")  # 휴대폰 사진 회전 정보 반영
         s = max(W / im.width, H / im.height) * 1.14
         im = im.resize((int(im.width * s) + 1, int(im.height * s) + 1), Image.LANCZOS)
         self.im, self.shade = im, shade
