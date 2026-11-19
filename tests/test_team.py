@@ -80,8 +80,13 @@ print("== 불러온 댓글:", at.session_state["comments_in"].count("\n") + 1, "
 at.text_input(key="c_brand").set_value("하루빈 커피")
 click(at, "분류하고")
 posts = [b.label for b in at.button if "게시" in b.label]
-print("   게시 버튼 수:", len(posts), "(문의·칭찬만 2개여야 함)")
+print("   게시 버튼 수:", len(posts), "(문의·칭찬 2개 + 불만 직접 쓰기 1개)")
 click(at, "이 답글 게시"); print("   게시 결과:", LOG, "| 성공 표시", texts(at)["ok"][:1])
+# 7-1) 불만 댓글: AI 초안 없이 직접 쓴 답글 게시
+print("   불만 안내:", [w for w in texts(at)["warn"] if "불만" in w][:1])
+at.text_area(key="human_3").set_value("불편을 드려 죄송합니다. 고객센터로 주문번호를 알려 주시면 확인해 드릴게요.").run()
+[b for b in at.button if b.key == "post_3"][0].click().run()
+print("== 직접 쓴 답글 게시:", LOG[-1])
 # 8) 위험 표현 답글 게시 막기
 at.text_area(key="reply_2").set_value("업계 최고의 커피예요!").run()
 [b for b in at.button if b.key == "post_2"][0].click().run()

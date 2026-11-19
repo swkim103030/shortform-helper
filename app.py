@@ -86,6 +86,35 @@ def show_ai_error(e):
             st.code(e.detail, language=None)
 
 
+def human_notice(it):
+    """사람이 처리할 댓글에 맞는 안내 문구"""
+    reason = (it.get("reason") or "").lower()
+    if any(k in reason for k in ("주입", "injection", "조작", "무관", "장난", "탈옥")):
+        return "브랜드와 무관하거나 AI를 조작하려는 댓글로 보여요. 답하지 않는 걸 권장해요."
+    if it["category"] == "불만":
+        return "불만 댓글이에요. 사과·환불·교환 같은 약속은 AI가 대신하지 않아요. 담당자가 판단해서 직접 답해 주세요."
+    return "개인정보·법률·건강·논란과 관련될 수 있는 댓글이에요. 답할지부터 담당자가 판단해 주세요."
+
+
+def post_reply(n, th, text, banned):
+    """확인 버튼을 눌러야만 유튜브에 답글을 게시한다"""
+    if th["thread_id"] in ss.posted:
+        st.success("유튜브에 답글을 달았어요.")
+        return
+    if st.button("✅ 확인했어요, 이 답글 게시", key=f"post_{n}"):
+        if not text.strip():
+            st.error("답글이 비어 있어요.")
+        elif checks.risky_terms(text, banned) or checks.find_personal(text):
+            st.error("답글에 주의 표현이나 개인정보가 있어서 게시하지 않았어요. 고친 뒤 다시 눌러 주세요.")
+        else:
+            try:
+                youtube.reply(youtube.client(), th["thread_id"], text.strip())
+                ss.posted.add(th["thread_id"])
+                st.rerun()
+            except youtube.YTError as e:
+                st.error(f"😥 {e}")
+
+
 def fill_sample():
     for k, v in SAMPLE.items():
         ss[f"in_{k}"] = v
@@ -424,30 +453,21 @@ with tab2:
                 st.markdown(f"**{icon[it['category']]} {it['category']}** · {it['comment']}")
                 if it["reason"]:
                     st.caption(f"분류 이유: {it['reason']}")
+                threads = ss.replies.get("threads") or []
+                th = threads[n - 1] if n - 1 < len(threads) else None
                 if it["category"] in checks.NEED_HUMAN:
-                    st.warning("담당자가 직접 확인하고 답해야 하는 댓글이에요. 환불·보상·건강 관련 약속을 AI가 대신하지 않아요.")
+                    st.warning(human_notice(it))
+                    if th and ss.team_ok:  # AI 초안 없이 사람이 직접 쓴 답만 게시
+                        with st.expander("✍️ 직접 답글 쓰기 (AI 초안 없음)"):
+                            text = st.text_area("답글", "", key=f"human_{n}", height=80,
+                                                placeholder="담당자가 직접 판단해서 쓰는 답글이에요.")
+                            post_reply(n, th, text, banned)
                 elif it["category"] == "스팸":
                     st.caption("답글을 달지 않아요. 플랫폼에서 숨김·신고를 권장해요.")
                 else:
                     text = st.text_area("답글 초안", it["reply"], key=f"reply_{n}", height=80)
-                    threads = ss.replies.get("threads") or []
-                    th = threads[n - 1] if n - 1 < len(threads) else None
                     if th and ss.team_ok:
-                        if th["thread_id"] in ss.posted:
-                            st.success("유튜브에 답글을 달았어요.")
-                        elif st.button("✅ 확인했어요, 이 답글 게시", key=f"post_{n}"):
-                            problems = checks.risky_terms(text, banned) or checks.find_personal(text)
-                            if not text.strip():
-                                st.error("답글이 비어 있어요.")
-                            elif problems:
-                                st.error("답글에 주의 표현이나 개인정보가 있어서 게시하지 않았어요. 고친 뒤 다시 눌러 주세요.")
-                            else:
-                                try:
-                                    youtube.reply(youtube.client(), th["thread_id"], text.strip())
-                                    ss.posted.add(th["thread_id"])
-                                    st.rerun()
-                                except youtube.YTError as e:
-                                    st.error(f"😥 {e}")
+                        post_reply(n, th, text, banned)
                 for note in it["notes"]:
                     st.caption(f"⚠️ {note}")
         st.caption(f"생성 모델: {ss.replies['model']} · 답글은 꼭 확인한 뒤 게시하세요.")
