@@ -37,6 +37,9 @@ def configured():
 
 
 PIXABAY_API = "https://pixabay.com/api/videos/"
+# 얼굴이 보이는 실제 인물은 광고에서 '그 사람이 추천하는 것'처럼 보일 수 있어 뒤로 미룬다 (Pixabay 약관도 금지)
+PEOPLE = ("woman", "man", "girl", "boy", "people", "person", "portrait", "model", "face", "lady", "smile",
+          "child", "kid", "couple", "selfie", "beauty", "young", "adult")
 
 
 def search_pixabay(query, key, used=(), per_page=10):
@@ -58,13 +61,14 @@ def search_pixabay(query, key, used=(), per_page=10):
         f = files[0]
         tags = (h.get("tags") or "").lower()
         match = sum(1 for w in words if w in tags)
-        best.append((-match, not portrait, f["height"] < 1080, {
+        has_people = any(p in tags.replace(",", " ").split() for p in PEOPLE)
+        best.append((has_people, -match, not portrait, f["height"] < 1080, {
             "id": h["id"], "url": f["url"], "width": f["width"], "height": f["height"],
             "author": h.get("user", ""), "page": h.get("pageURL", ""), "source": "Pixabay"}))
     if not best:
         return None
-    best.sort(key=lambda b: b[:3])  # 태그가 검색어와 많이 겹치는 것 → 세로 → 1080 이상 (그 안에서는 검색 순위)
-    return best[0][3]
+    best.sort(key=lambda b: b[:4])  # 인물 없는 것 → 태그가 검색어와 많이 겹치는 것 → 세로 → 1080 이상
+    return best[0][4]
 
 
 def _get_json(url, key):
