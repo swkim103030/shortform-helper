@@ -45,9 +45,9 @@ def _client():
         raise AIError("AI 키가 설정되지 않았습니다. 관리자에게 문의해 주세요. (Secrets에 GEMINI_API_KEY 필요)")
     from google import genai
     from google.genai import types
-    # 한 번 호출이 40초를 넘기면 끊고, SDK 자체 재시도는 끈다(재시도는 아래에서 직접 관리)
+    # 한 번 호출이 30초를 넘기면 끊고, SDK 자체 재시도는 끈다(재시도는 아래에서 직접 관리)
     return genai.Client(api_key=key, http_options=types.HttpOptions(
-        timeout=40_000, retry_options=types.HttpRetryOptions(attempts=1)))
+        timeout=30_000, retry_options=types.HttpRetryOptions(attempts=1)))
 
 
 def _parse_json(text):
@@ -97,42 +97,58 @@ def _discover(client, tried):
     return sorted(found, key=rank)[:6]
 
 
+_LAST_OK = {}  # 서버 안에서 마지막으로 성공한 모델 (다음 요청은 이 모델부터)
+
+
 def generate_json(system, prompt, required_keys, temperature=0.9, _client_factory=None):
     """Gemini에 JSON 형식 결과를 요청한다. 반환: (dict, 사용한 모델 이름)"""
     from google.genai import errors, types
 
     client = (_client_factory or _client)()
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        response_mime_type="application/json",
-        temperature=temperature,
-        max_output_tokens=MAX_OUTPUT_TOKENS,
-    )
+    def config_for(model, think=True):
+        extra = {}
+        if think and model.startswith("gemini-3"):  # 대본 쓰기엔 깊은 추론이 필요 없어서 '생각'을 줄여 빠르게
+            extra["thinking_config"] = types.ThinkingConfig(thinking_level="low")
+        elif think and model.startswith("gemini-2.5"):
+            extra["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        return types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json",
+                                           temperature=temperature, max_output_tokens=MAX_OUTPUT_TOKENS, **extra)
+
+    no_think = set()  # 생각 설정을 거부한 모델
     busy = False  # 붐빔(429/503) 때문에 넘어간 모델이 있었는지
     log = []  # 시도 기록 (화면의 '자세한 원인'에 표시)
     models = _models()
+    if _LAST_OK.get("model"):  # 최근에 잘 됐던 모델부터
+        models = [_LAST_OK["model"]] + [m for m in models if m != _LAST_OK["model"]]
     discovered = False
     i = 0
     start = time.time()
     while i < len(models):
-        if time.time() - start > 75:  # 전체 대기 시간 상한
+        if time.time() - start > 110:  # 전체 대기 시간 상한
             log.append("시간 초과로 중단")
             busy = True
             break
         model = models[i]
         i += 1
-        if i == len(models) and not discovered:  # 마지막 후보까지 왔으면 목록 조회로 보충
+        if i >= 2 and not discovered:  # 처음 후보가 실패하면 쓸 수 있는 모델 목록으로 보충 (가벼운 lite 모델을 바로 다음에)
             discovered = True
-            models += _discover(client, set(models))
+            found = _discover(client, set(models))
+            lite = [m for m in found if "lite" in m][:1]
+            models[i - 1:i - 1] = lite
+            models += [m for m in found if m not in lite]
         for attempt in range(2):  # 형식이 깨졌거나 일시 오류면 한 번 더
             try:
-                resp = client.models.generate_content(model=model, contents=prompt, config=config)
+                resp = client.models.generate_content(model=model, contents=prompt,
+                                                      config=config_for(model, model not in no_think))
             except errors.APIError as e:
                 code = getattr(e, "code", None)
                 msg = str(getattr(e, "message", "") or e)[:150]
                 log.append(f"{model}: API 오류 {code} {msg}")
                 if code == 404:  # 모델 이름이 없으면 다음 모델로
                     break
+                if code == 400 and "think" in msg.lower() and model not in no_think:  # 생각 설정 미지원 → 빼고 다시
+                    no_think.add(model)
+                    continue
                 if code in (401, 403) or (code == 400 and "key" in msg.lower()):
                     raise AIError("AI 키가 올바르지 않습니다. 관리자에게 문의해 주세요.", "\n".join(log)) from None
                 if code == 429 or (code and code >= 500):  # 붐비거나 한도 초과 → 다른 모델로
@@ -155,6 +171,7 @@ def generate_json(system, prompt, required_keys, temperature=0.9, _client_factor
                 missing = [k for k in required_keys if k not in data]
                 if missing:
                     raise ValueError(f"항목 누락 {missing}")
+                _LAST_OK["model"] = model
                 return data, model
             except (ValueError, json.JSONDecodeError) as e:
                 log.append(f"{model}: 결과 해석 실패 ({type(e).__name__}: {str(e)[:60]}) · 종료 사유 {reason} · "
