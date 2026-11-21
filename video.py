@@ -2,6 +2,8 @@
 
 render.py / tts.py는 PC용 자동화(sns-auto)에서 쓰던 코드를 그대로 가져왔다.
 """
+import hashlib
+import json
 import re
 import tempfile
 import time
@@ -73,7 +75,9 @@ def assign_photos(n, photos):
     return slots
 
 
-def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=False, photos=None):
+def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=False, photos=None,
+               music=None, music_file=None, music_seed=0):
+    """music: bgm.MOODS의 분위기 이름(없으면 None), music_file: (파일명, bytes) 사용자가 올린 음악"""
     """mp4 바이트와 정보(dict)를 돌려준다. progress(비율 0~1, 문구)로 진행 상황을 알린다."""
     scenes = plan_scenes(script.get("scenes", []), req)
     if not scenes:
@@ -109,6 +113,17 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
                 stock_slots[i] = g
         if mine or stock:
             scene_media = [m or s_ for m, s_ in zip(mine_slots, stock_slots)]
+        bgm_path = None
+        if music_file:
+            name, data = music_file
+            bgm_path = tmp / f"user_music{Path(name).suffix.lower() or '.mp3'}"
+            bgm_path.write_bytes(data)
+        elif music:
+            import bgm as bgm_mod
+            say(0.45, "배경음악 만드는 중...")
+            seed = int.from_bytes(hashlib.sha1(json.dumps(script, ensure_ascii=False, sort_keys=True)
+                                               .encode()).digest()[:4], "big") + music_seed
+            bgm_path = bgm_mod.get(music, tempfile.gettempdir(), seed)
         brand = {"name": req["brand"], "cta": req.get("cta", ""), "tagline": "",
                  "colors": {"primary": colors["primary"], "accent": colors["accent"]},
                  "ai_label": "AI 생성 영상" if ai_label else ""}
@@ -123,7 +138,7 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
 
         info = render.render_video({"scenes": scenes}, product, brand, voices, durations, out, tmp,
                                    assets=None, log=log, always_label=ai_label,
-                                   scene_media=scene_media)
+                                   scene_media=scene_media, bgm_path=bgm_path)
         data = out.read_bytes()
         thumb = (tmp / "scene_00.png").read_bytes() if (tmp / "scene_00.png").exists() else None
     info.update(silent_scenes=failed, scenes=n, elapsed=time.time() - started, thumbnail=thumb, credits=credits,

@@ -495,7 +495,7 @@ def draw_topbar(canvas, chip, i, n, p, col, label=None):
 
 
 def render_video(script, product, brand, voices, durations, out_path, workdir, assets=None, log=None,
-                 always_label=False, scene_media=None):
+                 always_label=False, scene_media=None, bgm_path=None, bgm_volume=0.3):
     """voices: 장면별 음성 파일, durations: 장면별 음성 길이(초). 장면 길이는 음성 길이 + PAD."""
     workdir = Path(workdir)
     scenes = script["scenes"]
@@ -503,7 +503,7 @@ def render_video(script, product, brand, voices, durations, out_path, workdir, a
     primary = hex_rgb(product.get("color") or brand["colors"]["primary"])
     col = {"primary": primary, "accent": hex_rgb(brand["colors"]["accent"]), "dark": mix(primary, (0, 0, 0), 0.55)}
     chip = pill_sprite(brand["name"], font(40), (0, 0, 0, 120), (255, 255, 255, 255), 30, 16)
-    media, bgm = find_media(assets, product["id"]), find_bgm(assets)
+    media, bgm = find_media(assets, product["id"]), (bgm_path or find_bgm(assets))
     if scene_media is not None:  # 장면별 배경을 직접 지정 (None인 장면은 그라데이션)
         media = [Path(m) if m else None for m in scene_media]
     label = None
@@ -530,9 +530,12 @@ def render_video(script, product, brand, voices, durations, out_path, workdir, a
     if bgm:
         cmd += ["-stream_loop", "-1", "-i", str(bgm)]
         fo = max(0.0, total_sec - 1.2)
-        filt.append(f"[{n + 1}:a]aresample=44100,aformat=channel_layouts=stereo,volume=0.13,"
+        filt.append(f"[{n + 1}:a]aresample=44100,aformat=channel_layouts=stereo,volume={bgm_volume:.3f},"
                     f"atrim=0:{total_sec:.3f},afade=t=in:d=0.6,afade=t=out:st={fo:.3f}:d=1.2[bgm]")
-        filt.append("[voice][bgm]amix=inputs=2:duration=first:normalize=0[mix]")
+        # 목소리가 나오는 동안 음악을 자동으로 줄인다 (사이드체인 덕킹)
+        filt.append("[voice]asplit=2[vmain][vkey]")
+        filt.append("[bgm][vkey]sidechaincompress=threshold=0.015:ratio=8:attack=15:release=450:makeup=1[bgmd]")
+        filt.append("[vmain][bgmd]amix=inputs=2:duration=first:normalize=0[mix]")
         amap = "[mix]"
     cmd += ["-filter_complex", ";".join(filt), "-map", "0:v", "-map", amap,
             "-c:v", "libx264", "-preset", os.environ.get("X264_PRESET", "veryfast"), "-crf", "20", "-pix_fmt", "yuv420p",

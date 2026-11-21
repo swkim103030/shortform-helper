@@ -33,6 +33,7 @@ prompts.py             AI 지시문
 checks.py              결과 검사기, 개인정보 감지, 댓글 규칙 강제
 video.py               대본 → 음성 → 영상
 render.py, tts.py      영상 그리기·음성 (PC 자동화 sns-auto에서 가져옴)
+bgm.py                 배경음악 합성 (외부 음원 없이 코드로 생성, 분위기 3가지)
 stock.py               장면 배경용 무료 스톡 영상 검색·다운로드 (Pixabay/Pexels)
 instagram.py           인스타 릴스 업로드
 youtube.py             유튜브 업로드, 채널 댓글 불러오기·답글 게시

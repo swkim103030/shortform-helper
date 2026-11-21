@@ -18,6 +18,7 @@ import ai
 import checks
 import stock
 import prompts
+import bgm
 import instagram
 import video
 import youtube
@@ -47,6 +48,7 @@ ss.setdefault("calls", [])
 ss.setdefault("video_times", [])
 ss.setdefault("uploaded", {})
 ss.setdefault("ig_posted", {})
+ss.setdefault("music_seed", 0)
 ss.setdefault("posted", set())
 ss.setdefault("team_ok", False)
 for k, v in SAMPLE.items():
@@ -137,6 +139,25 @@ with st.sidebar:
     bg_options = ([f"스톡 영상 ({stock.provider()})"] if stock.configured() else []) + ["애니메이션 배경"]
     bg_mode = st.radio("배경", bg_options, help="스톡 영상: 장면마다 AI가 만든 검색어로 무료 실사 영상을 찾아 깔아요.")
     use_stock = bg_mode.startswith("스톡")
+    music_name = st.selectbox("배경음악", list(bgm.MOODS) + ["없음"],
+                              help="코드로 직접 만든 음악이라 저작권 걱정이 없어요. 목소리가 나올 땐 자동으로 작아져요.")
+    music_up = st.file_uploader("또는 내 음악 파일", type=["mp3", "m4a", "wav"],
+                                help="저작권이 해결된 음악만 올려 주세요. 15MB까지, 서버에 저장하지 않아요.")
+    music_file = None
+    if music_up is not None:
+        if music_up.size > 15 * 1024 * 1024:
+            st.warning("음악 파일은 15MB까지만 쓸 수 있어요.")
+        else:
+            music_file = (music_up.name, music_up.getvalue())
+    if music_name != "없음" and not music_file:
+        st.caption("영상마다 조·빠르기·화음이 달라져서 매번 다른 곡이 나와요.")
+        m1, m2 = st.columns(2)
+        if m1.button("🎵 분위기 듣기", width="stretch"):
+            import tempfile
+            with st.spinner("음악 만드는 중..."):
+                st.audio(str(bgm.get(music_name, tempfile.gettempdir(), ss.music_seed)))
+        if m2.button("🎲 다른 곡", width="stretch", help="같은 대본이라도 다른 곡으로 다시 만들어요."):
+            ss.music_seed += 1
     ai_label = st.checkbox("화면에 'AI 생성 영상' 표시", value=True)
     st.divider()
     st.subheader("🔑 팀 기능")
@@ -298,7 +319,8 @@ with tab1:
             st.caption(f"📷 {plan}" + (" (나머지 장면은 스톡 영상)" if use_stock and len(photos) < len(slots) else ""))
         photo_sig = [hashlib.sha1(d).hexdigest()[:8] for _, d in photos]
         vkey = hashlib.sha1(json.dumps([final["scenes"], color_main, color_accent, voice_name, ai_label, use_stock,
-                                        photo_sig,
+                                        photo_sig, music_name, ss.music_seed,
+                                        hashlib.sha1(music_file[1]).hexdigest()[:8] if music_file else "",
                                         req["brand"], req["name"]], ensure_ascii=False).encode()).hexdigest()[:12]
         if st.button("🎬 영상 만들기", type="primary", width="stretch"):
             if any(not sc["caption"] or not sc["narration"] for sc in final["scenes"]):
@@ -310,7 +332,9 @@ with tab1:
                                                  {"primary": color_main, "accent": color_accent},
                                                  video.VOICES[voice_name], ai_label,
                                                  progress=lambda p, m: bar.progress(min(1.0, p), m),
-                                                 stock=use_stock, photos=photos)
+                                                 stock=use_stock, photos=photos,
+                                                 music=None if music_name == "없음" else music_name,
+                                                 music_file=music_file, music_seed=ss.music_seed)
                     ss.video = {"key": vkey, "mp4": mp4, "info": info, "script_id": ss.script["id"]}
                 except Exception as e:
                     ss.pop("video", None)
@@ -533,7 +557,7 @@ with tab3:
 
 ### 무엇을 해 주나요
 - **쇼츠 대본:** 장면별 화면 문구와 나레이션, 제목 후보, 설명란, 해시태그, 인스타 글
-- **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요. 배경은 무료 스톡 영상이나 **내 제품 사진·영상**을 써요
+- **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요. 배경은 무료 스톡 영상이나 **내 제품 사진·영상**을 쓰고, **직접 합성한 배경음악**을 깔아요
 - **유튜브·인스타 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란·캡션에 AI 제작 사실을 적어요
 - **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 채널 댓글을 불러와 확인 후 게시
 - **자동 검사:** 금지 표현, 효능·과장 표현, 입력에 없는 숫자(AI가 지어낸 수치일 가능성)
