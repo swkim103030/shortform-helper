@@ -495,7 +495,7 @@ def draw_topbar(canvas, chip, i, n, p, col, label=None):
 
 
 def render_video(script, product, brand, voices, durations, out_path, workdir, assets=None, log=None,
-                 always_label=False, scene_media=None, bgm_path=None, bgm_volume=0.55, voice_volume=0.85):
+                 always_label=False, scene_media=None, bgm_path=None, bgm_volume=0.55, voice_volume=0.85, bgm_gap_db=None):
     """voices: 장면별 음성 파일, durations: 장면별 음성 길이(초). 장면 길이는 음성 길이 + PAD."""
     workdir = Path(workdir)
     scenes = script["scenes"]
@@ -530,12 +530,16 @@ def render_video(script, product, brand, voices, durations, out_path, workdir, a
     if bgm:
         cmd += ["-stream_loop", "-1", "-i", str(bgm)]
         fo = max(0.0, total_sec - 1.2)
-        filt.append(f"[{n + 1}:a]aresample=44100,aformat=channel_layouts=stereo,volume={bgm_volume:.3f},"
+        if bgm_gap_db is None:  # 고정 배율
+            bgm_gain, voice_chain = f"volume={bgm_volume:.3f}", f"volume={voice_volume:.2f}"
+        else:  # 목소리와 음악을 같은 크기 기준(LUFS)으로 맞춘 뒤, 음악을 bgm_gap_db만큼 낮춘다
+            bgm_gain = f"loudnorm=I={-16 - bgm_gap_db:.1f}:TP=-3:LRA=11"
+            voice_chain = "loudnorm=I=-16:TP=-2:LRA=11"
+        filt.append(f"[{n + 1}:a]aresample=44100,aformat=channel_layouts=stereo,{bgm_gain},aresample=44100,"
                     f"atrim=0:{total_sec:.3f},afade=t=in:d=0.6,afade=t=out:st={fo:.3f}:d=1.2[bgm]")
-        # 목소리가 나오는 동안 음악을 자동으로 줄인다 (사이드체인 덕킹)
-        filt.append(f"[voice]volume={voice_volume:.2f},asplit=2[vmain][vkey]")
+        filt.append(f"[voice]{voice_chain},aresample=44100,asplit=2[vmain][vkey]")
         # 목소리가 나올 때 음악을 '살짝만' 줄인다 (너무 세게 줄이면 딱딱하게 들린다)
-        filt.append("[bgm][vkey]sidechaincompress=threshold=0.03:ratio=3:attack=30:release=600:makeup=1[bgmd]")
+        filt.append("[bgm][vkey]sidechaincompress=threshold=0.05:ratio=2:attack=40:release=700:makeup=1[bgmd]")
         filt.append("[vmain][bgmd]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mix]")
         amap = "[mix]"
     cmd += ["-filter_complex", ";".join(filt), "-map", "0:v", "-map", amap,
