@@ -24,6 +24,11 @@ THREADS = [{"thread_id": "T1", "video_id": "v", "author": "a", "text": "우유�
            {"thread_id": "T4", "video_id": "v", "author": "d", "text": "구독하고 우리 채널도 놀러오세요 http://spam.example"}]
 youtube.recent_comments = lambda yt, ch, limit=15: THREADS
 youtube.reply = lambda yt, tid, text: LOG.append(("reply", tid, text[:15]))
+import instagram
+instagram.configured = lambda: True
+def _ig(mp4, caption, progress=None):
+    LOG.append(("ig", len(mp4), "AI로 만들었고" in caption)); return "IG1", "https://www.instagram.com/reel/TEST/"
+instagram.publish_reel = _ig
 
 def new(pw=True):
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
@@ -64,6 +69,12 @@ at.session_state["video"]["info"]["silent_scenes"] = 0
 [c for c in at.checkbox if "직접 확인" in c.label][0].check()
 submit(at, "유튜브에 올리기"); print("== 체크 후 업로드:", [o for o in texts(at)["ok"] if "업로드" in o], LOG[-1] if LOG else None)
 
+# 4-1) 인스타: 체크 없이 → 막힘, 체크 후 → 게시
+[b for b in at.button if "인스타에 올리기" in b.label][0].click().run()
+print("== 인스타 체크 없이:", [e for e in texts(at)["err"] if "체크" in e][:1], "| 호출", sum(1 for l in LOG if l[0] == "ig"))
+[c for c in at.checkbox if "인스타에 공개로" in c.label][0].check()
+[b for b in at.button if "인스타에 올리기" in b.label][0].click().run()
+print("== 인스타 체크 후:", [o for o in texts(at)["ok"] if "릴스" in o], [l for l in LOG if l[0] == "ig"])
 # 5) 대본 수정 후 → 영상이 달라졌다는 안내
 # (data_editor 직접 편집은 AppTest가 지원하지 않아 설정 변경으로 대신 확인)
 at.color_picker[0].set_value("#123456").run()

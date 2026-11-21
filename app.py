@@ -18,6 +18,7 @@ import ai
 import checks
 import stock
 import prompts
+import instagram
 import video
 import youtube
 
@@ -45,6 +46,7 @@ ss = st.session_state
 ss.setdefault("calls", [])
 ss.setdefault("video_times", [])
 ss.setdefault("uploaded", {})
+ss.setdefault("ig_posted", {})
 ss.setdefault("posted", set())
 ss.setdefault("team_ok", False)
 for k, v in SAMPLE.items():
@@ -391,6 +393,48 @@ with tab1:
                                 st.error(f"😥 업로드에 실패했어요. ({type(e).__name__})")
                 st.caption("ℹ️ 학생용(미검수) 구글 프로젝트라 유튜브가 영상을 '비공개'로 바꿀 수 있어요.")
 
+            # ───── 인스타그램 릴스 (팀 전용) ─────
+            st.markdown("#### 📸 인스타 릴스로 올리기")
+            if not ss.team_ok:
+                st.caption("🔒 인스타 업로드도 팀원만 쓸 수 있어요. 영상과 인스타 글은 위에서 받아 직접 올릴 수도 있어요.")
+            elif not instagram.configured():
+                st.caption("인스타 계정이 아직 연결되지 않았어요. (관리자: Secrets에 INSTAGRAM_TOKEN 추가)")
+            elif vid["key"] in ss.ig_posted:
+                st.success(f"릴스 게시 완료! {ss.ig_posted[vid['key']]}")
+            else:
+                with st.form(f"ig_{vid['key']}"):
+                    tags = " ".join(h if h.startswith("#") else f"#{h}"
+                                    for h in res.get("hashtags", []) if isinstance(h, str))
+                    ig_caption = st.text_area("캡션", (res.get("instagram", "") + "\n\n" + tags + "\n\n" + AI_NOTICE).strip(),
+                                              height=170, max_chars=2200)
+                    ig_agree = st.checkbox("영상과 캡션을 직접 확인했고, 인스타에 공개로 올리는 데 동의해요.",
+                                           key=f"ig_agree_{vid['key']}")
+                    ig_send = st.form_submit_button("📸 인스타에 올리기", type="primary", width="stretch")
+                if ig_send:
+                    if not ig_agree:
+                        st.error("올리기 전에 확인 칸에 체크해 주세요. (사람 확인 없이 자동으로 올리지 않아요)")
+                    elif chk["errors"]:
+                        st.error("대본에 '꼭 고쳐야 할 점'이 남아 있어서 올릴 수 없어요.")
+                    elif info.get("silent_scenes"):
+                        st.error("음성이 빠진 장면이 있는 영상은 올리지 않아요. 영상을 다시 만들어 주세요.")
+                    elif vid["key"] != vkey:
+                        st.error("지금 대본·설정과 영상이 달라요. '영상 만들기'를 다시 누른 뒤 올려 주세요.")
+                    else:
+                        note = st.empty()
+                        try:
+                            with st.spinner("인스타에 올리는 중... (1~3분)"):
+                                _, link = instagram.publish_reel(vid["mp4"], ig_caption,
+                                                                 progress=lambda m: note.caption(m))
+                            ss.ig_posted[vid["key"]] = link
+                            st.rerun()
+                        except instagram.IGError as e:
+                            note.empty()
+                            st.error(f"😥 {e}")
+                        except Exception as e:
+                            note.empty()
+                            st.error(f"😥 인스타 업로드에 실패했어요. ({type(e).__name__})")
+                st.caption("ℹ️ 인스타는 일부 공개가 없어서 바로 공개로 올라가요. 시연용 계정에서만 쓰세요.")
+
 # ───────── 탭 2: 댓글 응대 ─────────
 with tab2:
     st.write("영상에 달린 댓글을 **한 줄에 하나씩** 붙여 넣으세요. AI가 분류하고 답글 초안을 써요. "
@@ -490,7 +534,7 @@ with tab3:
 ### 무엇을 해 주나요
 - **쇼츠 대본:** 장면별 화면 문구와 나레이션, 제목 후보, 설명란, 해시태그, 인스타 글
 - **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요. 배경은 무료 스톡 영상이나 **내 제품 사진·영상**을 써요
-- **유튜브 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란에 AI 제작 사실을 적어요
+- **유튜브·인스타 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란·캡션에 AI 제작 사실을 적어요
 - **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 채널 댓글을 불러와 확인 후 게시
 - **자동 검사:** 금지 표현, 효능·과장 표현, 입력에 없는 숫자(AI가 지어낸 수치일 가능성)
 
