@@ -149,6 +149,7 @@ with st.sidebar:
             st.warning("음악 파일은 15MB까지만 쓸 수 있어요.")
         else:
             music_file = (music_up.name, music_up.getvalue())
+    music_level = st.slider("배경음악 크기", 1, 10, 6, help="목소리 대비 음악 크기. 목소리가 나올 땐 자동으로 살짝 작아져요.")
     if music_name != "없음" and not music_file:
         st.caption("영상마다 조·빠르기·화음이 달라져서 매번 다른 곡이 나와요.")
         m1, m2 = st.columns(2)
@@ -322,7 +323,7 @@ with tab1:
             st.caption(f"📷 {plan}" + (" (나머지 장면은 스톡 영상)" if use_stock and len(photos) < len(slots) else ""))
         photo_sig = [hashlib.sha1(d).hexdigest()[:8] for _, d in photos]
         vkey = hashlib.sha1(json.dumps([final["scenes"], color_main, color_accent, voice_name, ai_label, use_stock,
-                                        photo_sig, music_name, ss.music_seed,
+                                        photo_sig, music_name, ss.music_seed, music_level,
                                         hashlib.sha1(music_file[1]).hexdigest()[:8] if music_file else "",
                                         req["brand"], req["name"]], ensure_ascii=False).encode()).hexdigest()[:12]
         if st.button("🎬 영상 만들기", type="primary", width="stretch"):
@@ -337,7 +338,8 @@ with tab1:
                                                  progress=lambda p, m: bar.progress(min(1.0, p), m),
                                                  stock=use_stock, photos=photos,
                                                  music=None if music_name == "없음" else music_name,
-                                                 music_file=music_file, music_seed=ss.music_seed)
+                                                 music_file=music_file, music_seed=ss.music_seed,
+                                                 music_level=music_level)
                     ss.video = {"key": vkey, "mp4": mp4, "info": info, "script_id": ss.script["id"]}
                 except Exception as e:
                     ss.pop("video", None)

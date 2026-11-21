@@ -495,7 +495,7 @@ def draw_topbar(canvas, chip, i, n, p, col, label=None):
 
 
 def render_video(script, product, brand, voices, durations, out_path, workdir, assets=None, log=None,
-                 always_label=False, scene_media=None, bgm_path=None, bgm_volume=0.3):
+                 always_label=False, scene_media=None, bgm_path=None, bgm_volume=0.55, voice_volume=0.85):
     """voices: 장면별 음성 파일, durations: 장면별 음성 길이(초). 장면 길이는 음성 길이 + PAD."""
     workdir = Path(workdir)
     scenes = script["scenes"]
@@ -533,9 +533,10 @@ def render_video(script, product, brand, voices, durations, out_path, workdir, a
         filt.append(f"[{n + 1}:a]aresample=44100,aformat=channel_layouts=stereo,volume={bgm_volume:.3f},"
                     f"atrim=0:{total_sec:.3f},afade=t=in:d=0.6,afade=t=out:st={fo:.3f}:d=1.2[bgm]")
         # 목소리가 나오는 동안 음악을 자동으로 줄인다 (사이드체인 덕킹)
-        filt.append("[voice]asplit=2[vmain][vkey]")
-        filt.append("[bgm][vkey]sidechaincompress=threshold=0.015:ratio=8:attack=15:release=450:makeup=1[bgmd]")
-        filt.append("[vmain][bgmd]amix=inputs=2:duration=first:normalize=0[mix]")
+        filt.append(f"[voice]volume={voice_volume:.2f},asplit=2[vmain][vkey]")
+        # 목소리가 나올 때 음악을 '살짝만' 줄인다 (너무 세게 줄이면 딱딱하게 들린다)
+        filt.append("[bgm][vkey]sidechaincompress=threshold=0.03:ratio=3:attack=30:release=600:makeup=1[bgmd]")
+        filt.append("[vmain][bgmd]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[mix]")
         amap = "[mix]"
     cmd += ["-filter_complex", ";".join(filt), "-map", "0:v", "-map", amap,
             "-c:v", "libx264", "-preset", os.environ.get("X264_PRESET", "veryfast"), "-crf", "20", "-pix_fmt", "yuv420p",
