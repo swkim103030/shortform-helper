@@ -127,12 +127,12 @@ def fill_sample():
 
 # ───────── 사이드바: 브랜드 설정 ─────────
 with st.sidebar:
-    st.header("⚙️ 브랜드 설정")
+    st.header("브랜드 설정")
     tone = st.selectbox("말투", list(prompts.TONES), key="tone")
     cta = st.text_input("행동 유도 문구", "프로필 링크에서 확인하세요!", max_chars=40)
     banned_raw = st.text_input("금지 표현 (쉼표로 구분)", "최고, 1등, 무조건, 완벽", max_chars=200)
     banned = [w.strip() for w in banned_raw.split(",") if w.strip()]
-    st.subheader("🎥 영상 설정")
+    st.subheader("영상 설정")
     k1, k2 = st.columns(2)
     color_main = k1.color_picker("배경색", "#6B3E26")
     color_accent = k2.color_picker("강조색", "#F2B05E")
@@ -165,7 +165,7 @@ with st.sidebar:
             ss.music_seed += 1
     ai_label = st.checkbox("화면에 'AI 생성 영상' 표시", value=True)
     st.divider()
-    st.subheader("🔑 팀 기능")
+    st.subheader("팀 기능")
     team_pw = _secret_value("TEAM_PASSWORD")
     if not team_pw:
         st.caption("유튜브 업로드·댓글 게시는 관리자가 팀 비밀번호를 설정해야 쓸 수 있어요.")
@@ -243,8 +243,9 @@ with tab1:
 
     if "script" in ss:
         res, chk, req = ss.script["data"], ss.script["check"], ss.script["req"]
-        st.divider()
-        st.subheader(f"결과: {req['name']}")
+        st.markdown(ui.section(2, f"대본: {req['name']}", "AI가 쓴 초안이에요. 표의 칸을 눌러 직접 고칠 수 있어요.",
+                               [("장면별 대본", True), ("제목 후보 3개", True), ("유튜브 설명란", True),
+                                ("인스타 글", True), ("과장·금지 표현 자동 검사", True)]), unsafe_allow_html=True)
         if chk["errors"]:
             st.error("**게시 전에 꼭 고쳐야 할 점**\n\n" + "\n".join(f"- {e}" for e in chk["errors"]))
         if chk["warnings"]:
@@ -300,8 +301,12 @@ with tab1:
         st.caption(f"생성 모델: {ss.script['model']} · 같은 입력도 다시 누르면 다른 결과가 나와요.")
 
         # ───── 영상 만들기 ─────
-        st.divider()
-        st.subheader("🎥 이 대본으로 영상 만들기")
+        _music = ("내 음악" if music_file else music_name)
+        st.markdown(ui.section(3, "이 대본으로 영상 만들기", "왼쪽 설정 메뉴에서 바꾼 내용이 아래 태그에 바로 반영돼요.",
+                               [(f"AI 음성 · {voice_name}", True), ("움직이는 자막", True),
+                                ("스톡 실사 영상" if use_stock else "애니메이션 배경", True),
+                                (f"배경음악 · {_music}" if _music != "없음" else "배경음악 없음", _music != "없음"),
+                                ("내 제품 사진", True), ("AI 생성 표시", ai_label)]), unsafe_allow_html=True)
         st.caption("장면마다 AI 음성과 움직이는 자막을 입혀 세로 쇼츠(1080×1920) 영상을 만들어요. 1분 안팎 걸려요. "
                    "색·목소리·배경은 설정 메뉴(휴대폰은 왼쪽 위 »)에서 바꿀 수 있어요."
                    + (" 배경은 표의 '배경 검색어'로 무료 스톡 영상을 찾아요." if use_stock else ""))
@@ -379,7 +384,10 @@ with tab1:
                                    mime="video/mp4", width="stretch")
 
             # ───── 유튜브 업로드 (팀 전용) ─────
-            st.markdown("#### 📤 유튜브에 올리기")
+            st.markdown(ui.section(4, "올리기", "확인한 영상을 바로 게시해요. 체크박스로 사람이 최종 확인해야 올라가요.",
+                                   [("유튜브 쇼츠", True), ("인스타 릴스", True), ("사람 확인 필수", True)]),
+                        unsafe_allow_html=True)
+            st.markdown(ui.sub("📤 유튜브에 올리기", True), unsafe_allow_html=True)
             if not ss.team_ok:
                 st.caption("🔒 유튜브 업로드는 팀원만 쓸 수 있어요. 설정 메뉴(휴대폰은 왼쪽 위 »)의 '팀 기능'에 비밀번호를 넣어 주세요. "
                            "영상은 위에서 받아 직접 올릴 수도 있어요.")
@@ -427,7 +435,7 @@ with tab1:
                 st.caption("ℹ️ 학생용(미검수) 구글 프로젝트라 유튜브가 영상을 '비공개'로 바꿀 수 있어요.")
 
             # ───── 인스타그램 릴스 (팀 전용) ─────
-            st.markdown("#### 📸 인스타 릴스로 올리기")
+            st.markdown(ui.sub("📸 인스타 릴스로 올리기", True), unsafe_allow_html=True)
             if not ss.team_ok:
                 st.caption("🔒 인스타 업로드도 팀원만 쓸 수 있어요. 영상과 인스타 글은 위에서 받아 직접 올릴 수도 있어요.")
             elif not instagram.configured():
@@ -470,6 +478,9 @@ with tab1:
 
 # ───────── 탭 2: 댓글 응대 ─────────
 with tab2:
+    st.markdown(ui.section("💬", "댓글 응대", "",
+                           [("AI 자동 분류", True), ("답글 초안", True), ("불만·민감은 사람에게", True),
+                            ("내 채널 댓글 불러오기", True), ("답글 바로 게시", True)], first=True), unsafe_allow_html=True)
     st.write("영상에 달린 댓글을 **한 줄에 하나씩** 붙여 넣으세요. AI가 분류하고 답글 초안을 써요. "
              "**불만·민감 댓글은 AI가 답하지 않고 담당자에게 넘겨요.**")
     b1, b2 = st.columns(2)
