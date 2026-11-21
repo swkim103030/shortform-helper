@@ -114,6 +114,7 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
         if mine or stock:
             scene_media = [m or s_ for m, s_ in zip(mine_slots, stock_slots)]
         bgm_path = None
+        music_error = ""
         if music_file:
             name, data = music_file
             bgm_path = tmp / f"user_music{Path(name).suffix.lower() or '.mp3'}"
@@ -123,7 +124,11 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
             say(0.45, "배경음악 만드는 중...")
             seed = int.from_bytes(hashlib.sha1(json.dumps(script, ensure_ascii=False, sort_keys=True)
                                                .encode()).digest()[:4], "big") + music_seed
-            bgm_path = bgm_mod.get(music, tempfile.gettempdir(), seed)
+            try:
+                bgm_path = bgm_mod.get(music, tempfile.gettempdir(), seed)
+            except Exception as e:  # 음악을 못 만들어도 영상은 만든다
+                bgm_path = None
+                music_error = f"{type(e).__name__}: {e}"[:200]
         brand = {"name": req["brand"], "cta": req.get("cta", ""), "tagline": "",
                  "colors": {"primary": colors["primary"], "accent": colors["accent"]},
                  "ai_label": "AI 생성 영상" if ai_label else ""}
@@ -142,6 +147,7 @@ def make_video(script, req, colors, voice, ai_label=True, progress=None, stock=F
         data = out.read_bytes()
         thumb = (tmp / "scene_00.png").read_bytes() if (tmp / "scene_00.png").exists() else None
     info.update(silent_scenes=failed, scenes=n, elapsed=time.time() - started, thumbnail=thumb, credits=credits,
-                stock_scenes=sum(1 for m in stock_slots if m), photo_scenes=sum(1 for m in mine_slots if m))
+                stock_scenes=sum(1 for m in stock_slots if m), photo_scenes=sum(1 for m in mine_slots if m),
+                music_error=music_error)
     say(1.0, "완성!")
     return data, info

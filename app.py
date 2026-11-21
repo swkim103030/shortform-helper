@@ -154,8 +154,11 @@ with st.sidebar:
         m1, m2 = st.columns(2)
         if m1.button("🎵 분위기 듣기", width="stretch"):
             import tempfile
-            with st.spinner("음악 만드는 중..."):
-                st.audio(str(bgm.get(music_name, tempfile.gettempdir(), ss.music_seed)))
+            try:
+                with st.spinner("음악 만드는 중..."):
+                    st.audio(str(bgm.get(music_name, tempfile.gettempdir(), ss.music_seed)))
+            except Exception as e:
+                st.error(f"음악을 만들지 못했어요. ({type(e).__name__})")
         if m2.button("🎲 다른 곡", width="stretch", help="같은 대본이라도 다른 곡으로 다시 만들어요."):
             ss.music_seed += 1
     ai_label = st.checkbox("화면에 'AI 생성 영상' 표시", value=True)
@@ -351,6 +354,8 @@ with tab1:
             if use_stock and info.get("stock_scenes", 0) + info.get("photo_scenes", 0) < info["scenes"]:
                 st.info(f"배경 영상을 {info.get('stock_scenes', 0)}/{info['scenes'] - info.get('photo_scenes', 0)}개 장면에서 찾았어요. "
                         "못 찾은 장면은 애니메이션 배경이에요. '배경 검색어'를 바꿔 다시 만들어 볼 수 있어요.")
+            if info.get("music_error"):
+                st.warning("배경음악을 만들지 못해서 음악 없이 만들었어요.")
             if info.get("silent_scenes"):
                 st.warning(f"음성 서버 연결이 불안정해서 {info['silent_scenes']}개 장면이 무음으로 만들어졌어요. 다시 만들어 보세요.")
             left, right = st.columns([3, 2])
