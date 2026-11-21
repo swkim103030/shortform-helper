@@ -20,6 +20,7 @@ import stock
 import prompts
 import bgm
 import instagram
+import ui
 import video
 import youtube
 
@@ -185,16 +186,15 @@ with st.sidebar:
     st.caption("🔒 개인정보(전화번호, 이메일, 주소 등)는 입력하지 마세요. 입력된 내용은 AI 처리를 위해 Google Gemini API로 전송됩니다.")
     st.caption("⚠️ AI 결과는 초안입니다. 게시 전에 사실과 표현을 꼭 확인하세요.")
 
-st.markdown("""<style>
-@media (max-width: 640px) {
-  h1 { font-size: 1.8rem !important; word-break: keep-all; }
-  h2, h3 { font-size: 1.3rem !important; }
-}
-</style>""", unsafe_allow_html=True)
-st.title("🎬 숏폼 마케팅 도우미")
-st.write("제품 정보를 넣으면 AI가 **쇼츠 대본**을 쓰고, 그 대본으로 **음성·자막이 들어간 쇼츠 영상**을 만들어요. "
-         "팀원은 확인한 영상을 **유튜브에 바로 올리고**, 채널 댓글에 **AI 답글**을 달 수 있어요. "
-         "광고에 쓰면 위험한 표현은 자동으로 찾아 알려 드려요.")
+st.markdown(ui.CSS, unsafe_allow_html=True)
+_done = 0
+if ss.get("script"):
+    _done = 2
+    if ss.get("video") and ss.video.get("script_id") == ss.script.get("id"):
+        _done = 3
+        if ss.video.get("key") in ss.uploaded or ss.video.get("key") in ss.ig_posted:
+            _done = 4
+st.markdown(ui.hero(_done), unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs(["📝 쇼츠 대본 만들기", "💬 댓글 응대", "ℹ️ 사용 안내"])
 
@@ -236,6 +236,7 @@ with tab1:
                     ss.script = {"data": data, "model": model, "req": req, "id": int(time.time() * 1000),
                                  "user_text": f"{user_text} {seconds}초",
                                  "check": checks.check_script(data, f"{user_text} {seconds}초", banned, seconds)}
+                    st.rerun()  # 맨 위 단계 표시·미리보기 화면을 새 대본으로 바꾼다
                 except ai.AIError as e:
                     ss.pop("script", None)
                     show_ai_error(e)
@@ -341,6 +342,7 @@ with tab1:
                                                  music_file=music_file, music_seed=ss.music_seed,
                                                  music_level=music_level)
                     ss.video = {"key": vkey, "mp4": mp4, "info": info, "script_id": ss.script["id"]}
+                    st.rerun()
                 except Exception as e:
                     ss.pop("video", None)
                     st.error(f"😥 영상을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({type(e).__name__})")
