@@ -29,6 +29,10 @@ instagram.configured = lambda: True
 def _ig(mp4, caption, progress=None):
     LOG.append(("ig", len(mp4), "AI로 만들었고" in caption)); return "IG1", "https://www.instagram.com/reel/TEST/"
 instagram.publish_reel = _ig
+IG_THREADS = [{"thread_id": "C1", "author": "coffee_lover", "text": "원액 하나로 몇 잔 나와요?", "permalink": ""},
+              {"thread_id": "C2", "author": "spam_bot", "text": "팔로우하면 선물 드려요 http://spam.example", "permalink": ""}]
+instagram.recent_comments = lambda limit=15: (IG_THREADS, {"id": "1", "username": "jongbbu"})
+instagram.reply = lambda cid, text: LOG.append(("ig_reply", cid, text[:15]))
 
 def new(pw=True):
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
@@ -87,18 +91,32 @@ at2 = new(pw=False); print("== 비번 미설정:", any("관리자가 팀 비밀�
 LOG.clear()
 at = new(); at.text_input[[t.label for t in at.text_input].index("팀 비밀번호")].set_value("team1234").run()
 click(at, "내 채널 새 댓글 불러오기")
-print("== 불러온 댓글:", at.session_state["comments_in"].count("\n") + 1, "| 브랜드칸:", repr(at.session_state["c_brand"]))
-at.text_input(key="c_brand").set_value("하루빈 커피")
+print("== 불러온 댓글:", at.session_state["yt_comments_in"].count("\n") + 1, "| 브랜드칸:", repr(at.session_state["yt_brand"]))
+at.text_input(key="yt_brand").set_value("하루빈 커피")
 click(at, "분류하고")
 posts = [b.label for b in at.button if "게시" in b.label]
 print("   게시 버튼 수:", len(posts), "(문의·칭찬 2개 + 불만 직접 쓰기 1개)")
 click(at, "이 답글 게시"); print("   게시 결과:", LOG, "| 성공 표시", texts(at)["ok"][:1])
 # 7-1) 불만 댓글: AI 초안 없이 직접 쓴 답글 게시
 print("   불만 안내:", [w for w in texts(at)["warn"] if "불만" in w][:1])
-at.text_area(key="human_3").set_value("불편을 드려 죄송합니다. 고객센터로 주문번호를 알려 주시면 확인해 드릴게요.").run()
-[b for b in at.button if b.key == "post_3"][0].click().run()
+at.text_area(key="yt_human_3").set_value("불편을 드려 죄송합니다. 고객센터로 주문번호를 알려 주시면 확인해 드릴게요.").run()
+[b for b in at.button if b.key == "yt_post_3"][0].click().run()
 print("== 직접 쓴 답글 게시:", LOG[-1])
 # 8) 위험 표현 답글 게시 막기
-at.text_area(key="reply_2").set_value("업계 최고의 커피예요!").run()
-[b for b in at.button if b.key == "post_2"][0].click().run()
+at.text_area(key="yt_reply_2").set_value("업계 최고의 커피예요!").run()
+[b for b in at.button if b.key == "yt_post_2"][0].click().run()
 print("== 위험 답글 게시:", texts(at)["err"], "| 게시 기록", len(LOG))
+
+# 9) 인스타 댓글 불러오기 → AI 분류 → 인스타 답글 게시
+LOG.clear()
+at = new(); at.text_input[[t.label for t in at.text_input].index("팀 비밀번호")].set_value("team1234").run()
+click(at, "내 인스타 새 댓글 불러오기")
+print("== 인스타 댓글:", at.session_state["ig_comments_in"].split("\n"), "| 유튜브칸 영향 없음:",
+      at.session_state.get("yt_comments_in", "") == "")
+at.text_input(key="ig_brand").set_value("하루빈 커피")
+[b for b in at.button if "분류하고" in b.label][1].click().run(); assert not at.exception, at.exception
+ig_posts = [b.key for b in at.button if b.key and b.key.startswith("ig_post_")]
+print("   인스타 게시 버튼:", ig_posts, "| 작성자 표시:", any("@coffee_lover" in m.value for m in at.markdown))
+if ig_posts:
+    [b for b in at.button if b.key == ig_posts[0]][0].click().run()
+print("== 인스타 답글 게시:", LOG, "| 성공:", [o for o in texts(at)["ok"] if "인스타" in o])

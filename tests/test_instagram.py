@@ -34,3 +34,22 @@ try:
     run(["IN_PROGRESS"] * 10)
 except instagram.IGError as e:
     print("== 시간 초과:", e)
+
+# 댓글 불러오기: 내 댓글·이미 답한 댓글은 빼고, 댓글 없는 게시물은 건너뛴다
+def fake_call2(method, path, **p):
+    if path == "me": return {"user_id": "99", "username": "jongbbu"}
+    if path == "99/media": return {"data": [{"id": "M1", "comments_count": 3, "permalink": "p1"}, {"id": "M2", "comments_count": 0}]}
+    if path == "M1/comments": return {"data": [
+        {"id": "c1", "text": "몇 잔 나와요?", "username": "a"},
+        {"id": "c2", "text": "고마워요", "username": "jongbbu"},
+        {"id": "c3", "text": "배송 빨라요", "username": "b", "replies": {"data": [{"username": "jongbbu"}]}}]}
+    if path == "c1/replies": CALLS.append((path, p["message"])); return {"id": "r1"}
+    raise AssertionError(path)
+CALLS = []
+instagram._call = fake_call2
+instagram._api = lambda: instagram.IG_API
+instagram._secret = lambda n: ""
+got, acct = instagram.recent_comments()
+print("== 인스타 댓글 불러오기:", [(c["thread_id"], c["author"]) for c in got], acct["username"])
+instagram.reply("c1", "원액 1에 물 3이에요")
+print("== 인스타 답글:", CALLS)

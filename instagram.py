@@ -58,8 +58,9 @@ def _call(method, path, **params):
             raise IGError("인스타 로그인 토큰이 만료됐거나 올바르지 않아요. 메타 대시보드에서 토큰을 새로 만들어 Secrets를 바꿔 주세요.")
         if code in (4, 9, 17, 32, 613):
             raise IGError("인스타 업로드 한도에 걸렸어요. 잠시 뒤에 다시 시도해 주세요.")
-        if code == 10 or code == 200:
-            raise IGError("인스타 계정에 게시 권한이 없어요. 프로페셔널 계정인지, 토큰에 게시 권한이 있는지 확인해 주세요.")
+        if code == 10 or code == 200 or (code or 0) >= 200 and (code or 0) < 300:
+            raise IGError("인스타 토큰에 이 작업 권한이 없어요. 프로페셔널 계정인지, 토큰을 만들 때 "
+                          "게시(content_publish)·댓글(manage_comments) 권한을 켰는지 확인해 주세요.")
         raise IGError(f"인스타 요청이 실패했어요. ({e.code} {str(msg)[:120]})")
     except urllib.error.URLError as e:
         raise IGError(f"인스타 서버에 연결하지 못했어요. ({type(e.reason).__name__})")
@@ -129,3 +130,33 @@ def publish_reel(mp4_bytes, caption, progress=None, wait_sec=240):
     except IGError:
         pass
     return mid, link or f"https://www.instagram.com/{acct['username']}/"
+
+
+def recent_comments(limit=15, posts=10):
+    """최근 게시물에 달린 댓글 중 아직 내 계정이 답하지 않은 것 (최신 게시물부터)"""
+    acct = account()
+    me = (acct.get("username") or "").lower()
+    media = _call("GET", f"{acct['id']}/media", fields="id,caption,permalink,comments_count", limit=posts)
+    out = []
+    for m in media.get("data", []):
+        if not m.get("comments_count"):
+            continue
+        res = _call("GET", f"{m['id']}/comments", fields="id,text,username,replies{username}", limit=50)
+        for c in res.get("data", []):
+            who = (c.get("username") or "").lower()
+            if me and who == me:
+                continue  # 내가 쓴 댓글
+            replies = (c.get("replies") or {}).get("data", [])
+            if me and any((r.get("username") or "").lower() == me for r in replies):
+                continue  # 이미 답함
+            text = (c.get("text") or "").strip()
+            if text:
+                out.append({"thread_id": c["id"], "author": c.get("username", ""), "text": text,
+                            "permalink": m.get("permalink", "")})
+            if len(out) >= limit:
+                return out, acct
+    return out, acct
+
+
+def reply(comment_id, text):
+    _call("POST", f"{comment_id}/replies", message=text[:2200])

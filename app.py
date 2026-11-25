@@ -101,23 +101,138 @@ def human_notice(it):
     return "개인정보·법률·건강·논란과 관련될 수 있는 댓글이에요. 답할지부터 담당자가 판단해 주세요."
 
 
-def post_reply(n, th, text, banned):
-    """확인 버튼을 눌러야만 유튜브에 답글을 게시한다"""
-    if th["thread_id"] in ss.posted:
-        st.success("유튜브에 답글을 달았어요.")
+PLATFORM = {"yt": "유튜브", "ig": "인스타"}
+
+
+def post_reply(p, n, th, text, banned):
+    """확인 버튼을 눌러야만 유튜브·인스타에 답글을 게시한다"""
+    if (p, th["thread_id"]) in ss.posted:
+        st.success(f"{PLATFORM[p]}에 답글을 달았어요.")
         return
-    if st.button("✅ 확인했어요, 이 답글 게시", key=f"post_{n}"):
+    if st.button("✅ 확인했어요, 이 답글 게시", key=f"{p}_post_{n}"):
         if not text.strip():
             st.error("답글이 비어 있어요.")
         elif checks.risky_terms(text, banned) or checks.find_personal(text):
             st.error("답글에 주의 표현이나 개인정보가 있어서 게시하지 않았어요. 고친 뒤 다시 눌러 주세요.")
         else:
             try:
-                youtube.reply(youtube.client(), th["thread_id"], text.strip())
-                ss.posted.add(th["thread_id"])
+                if p == "yt":
+                    youtube.reply(youtube.client(), th["thread_id"], text.strip())
+                else:
+                    instagram.reply(th["thread_id"], text.strip())
+                ss.posted.add((p, th["thread_id"]))
                 st.rerun()
-            except youtube.YTError as e:
+            except (youtube.YTError, instagram.IGError) as e:
                 st.error(f"😥 {e}")
+
+
+def fetch_comments(p):
+    """내 채널·계정의 새 댓글을 불러와 입력칸에 채운다"""
+    try:
+        with st.spinner(f"{PLATFORM[p]} 댓글을 불러오는 중..."):
+            if p == "yt":
+                yt = youtube.client()
+                ch = youtube.channel(yt)
+                threads, name = youtube.recent_comments(yt, ch, MAX_COMMENTS), ch["title"]
+            else:
+                threads, acct = instagram.recent_comments(MAX_COMMENTS)
+                name = "@" + acct.get("username", "")
+    except (youtube.YTError, instagram.IGError) as e:
+        st.error(f"😥 {e}")
+        return
+    if not threads:
+        st.info(f"'{name}'에 아직 답하지 않은 새 댓글이 없어요.")
+        return
+    lines = [" ".join(t["text"].split())[:300] for t in threads]
+    ss[f"{p}_comments_in"] = "\n".join(lines)
+    ss[f"{p}_threads"] = {"lines": lines, "threads": threads, "channel": name}
+    ss[f"{p}_brand"] = ss.get(f"{p}_brand") or ss.get("in_brand") or name.lstrip("@")
+    ss.pop(f"{p}_replies", None)
+    st.rerun()
+
+
+def comment_panel(p):
+    """댓글 응대 화면 한 개 (유튜브 또는 인스타)"""
+    name = PLATFORM[p]
+    connected = youtube.configured() if p == "yt" else instagram.configured()
+    b1, b2 = st.columns(2)
+    if b1.button("예시 댓글로 채우기", key=f"{p}_sample", width="stretch"):
+        ss[f"{p}_comments_in"] = SAMPLE_COMMENTS
+        ss[f"{p}_brand"] = ss.get("in_brand") or SAMPLE["brand"]
+        ss.pop(f"{p}_threads", None)
+    if ss.team_ok and connected:
+        label = "📥 내 채널 새 댓글 불러오기" if p == "yt" else "📥 내 인스타 새 댓글 불러오기"
+        if b2.button(label, key=f"{p}_fetch", width="stretch"):
+            fetch_comments(p)
+    elif not ss.team_ok:
+        b2.caption(f"🔒 팀원은 내 {name} 댓글을 바로 불러와 답글까지 게시할 수 있어요.")
+    else:
+        b2.caption(f"{name} 계정이 아직 연결되지 않았어요. (관리자 설정 필요)")
+    got = ss.get(f"{p}_threads")
+    if got:
+        st.caption(f"{'📺' if p == 'yt' else '📸'} '{got['channel']}'에서 불러온 댓글 {len(got['lines'])}개")
+    ss.setdefault(f"{p}_brand", ss.get("in_brand") or "")
+    ss.setdefault(f"{p}_comments_in", "")
+    with st.form(f"{p}_comment_form"):
+        cbrand = st.text_input("브랜드 이름 *", key=f"{p}_brand", max_chars=30)
+        cinfo = st.text_input("답글에 참고할 제품 정보 (선택)", max_chars=200, key=f"{p}_info",
+                              placeholder="예: 원액 1 : 우유 3 비율 추천, 배송은 평일 기준 2~3일")
+        raw = st.text_area("댓글 목록 *", key=f"{p}_comments_in", height=160, max_chars=3000)
+        go = st.form_submit_button("🤖 AI로 분류하고 답글 쓰기", type="primary", width="stretch")
+
+    if go:
+        comments = [c.strip() for c in raw.splitlines() if c.strip()][:MAX_COMMENTS]
+        if not cbrand.strip() or not comments:
+            st.error("브랜드 이름과 댓글을 1개 이상 입력해 주세요.")
+        elif allow_call():
+            masked = [checks.mask_personal(c) for c in comments]  # 개인정보는 가리고 AI에 보냄
+            if masked != comments:
+                st.info("댓글 속 전화번호·이메일 등은 가린 뒤 AI에 보냈어요.")
+            linked = bool(got) and comments == got["lines"]
+            with st.spinner("AI가 댓글을 읽고 있어요..."):
+                try:
+                    data, model = ai.generate_json(prompts.COMMENT_SYSTEM,
+                                                   prompts.comment_prompt(cbrand, tone, cinfo, banned, masked),
+                                                   ["items"], temperature=0.4)
+                    ss[f"{p}_replies"] = {"items": checks.enforce_comment_rules(data.get("items", []), masked, banned),
+                                          "model": model, "threads": got["threads"] if linked else None}
+                except ai.AIError as e:
+                    ss.pop(f"{p}_replies", None)
+                    show_ai_error(e)
+
+    rep = ss.get(f"{p}_replies")
+    if not rep:
+        return
+    items = rep["items"]
+    icon = {"문의": "❓", "칭찬": "😊", "불만": "⚠️", "민감": "🚫", "스팸": "🗑️"}
+    counts = {c: sum(1 for it in items if it["category"] == c) for c in checks.CATEGORIES}
+    st.divider()
+    # 휴대폰에서도 한 줄로 보이도록 표 대신 배지로 표시
+    st.markdown("  ".join(f"**{icon[c]} {c} {counts[c]}**" for c in checks.CATEGORIES))
+    threads = rep.get("threads") or []
+    for n, it in enumerate(items, 1):
+        with st.container(border=True):
+            th = threads[n - 1] if n - 1 < len(threads) else None
+            who = f" · @{th['author']}" if p == "ig" and th and th.get("author") else ""
+            st.markdown(f"**{icon[it['category']]} {it['category']}**{who} · {it['comment']}")
+            if it["reason"]:
+                st.caption(f"분류 이유: {it['reason']}")
+            if it["category"] in checks.NEED_HUMAN:
+                st.warning(human_notice(it))
+                if th and ss.team_ok:  # AI 초안 없이 사람이 직접 쓴 답만 게시
+                    with st.expander("✍️ 직접 답글 쓰기 (AI 초안 없음)"):
+                        text = st.text_area("답글", "", key=f"{p}_human_{n}", height=80,
+                                            placeholder="담당자가 직접 판단해서 쓰는 답글이에요.")
+                        post_reply(p, n, th, text, banned)
+            elif it["category"] == "스팸":
+                st.caption("답글을 달지 않아요. 플랫폼에서 숨김·신고를 권장해요.")
+            else:
+                text = st.text_area("답글 초안", it["reply"], key=f"{p}_reply_{n}", height=80)
+                if th and ss.team_ok:
+                    post_reply(p, n, th, text, banned)
+            for note in it["notes"]:
+                st.caption(f"⚠️ {note}")
+    st.caption(f"생성 모델: {rep['model']} · 답글은 꼭 확인한 뒤 게시하세요.")
 
 
 def fill_sample():
@@ -480,94 +595,15 @@ with tab1:
 with tab2:
     st.markdown(ui.section("💬", "댓글 응대", "",
                            [("AI 자동 분류", True), ("답글 초안", True), ("불만·민감은 사람에게", True),
-                            ("내 채널 댓글 불러오기", True), ("답글 바로 게시", True)], first=True), unsafe_allow_html=True)
-    st.write("영상에 달린 댓글을 **한 줄에 하나씩** 붙여 넣으세요. AI가 분류하고 답글 초안을 써요. "
+                            ("유튜브·인스타 댓글 불러오기", True), ("답글 바로 게시", True)], first=True),
+                unsafe_allow_html=True)
+    st.write("댓글을 **한 줄에 하나씩** 붙여 넣거나 내 계정에서 불러오세요. AI가 분류하고 답글 초안을 써요. "
              "**불만·민감 댓글은 AI가 답하지 않고 담당자에게 넘겨요.**")
-    b1, b2 = st.columns(2)
-    if b1.button("예시 댓글로 채우기", width="stretch"):
-        ss.comments_in = SAMPLE_COMMENTS
-        ss.c_brand = ss.get("in_brand") or SAMPLE["brand"]
-        ss.pop("yt_threads", None)
-    if ss.team_ok and youtube.configured():
-        if b2.button("📥 내 채널 새 댓글 불러오기", width="stretch"):
-            try:
-                with st.spinner("채널 댓글을 불러오는 중..."):
-                    yt = youtube.client()
-                    ch = youtube.channel(yt)
-                    threads = youtube.recent_comments(yt, ch, MAX_COMMENTS)
-                if not threads:
-                    st.info(f"'{ch['title']}' 채널에 아직 답하지 않은 새 댓글이 없어요.")
-                else:
-                    lines = [" ".join(t["text"].split())[:300] for t in threads]
-                    ss.comments_in = "\n".join(lines)
-                    ss.yt_threads = {"lines": lines, "threads": threads, "channel": ch["title"]}
-                    ss.c_brand = ss.get("c_brand") or ss.get("in_brand") or ch["title"]
-                    ss.pop("replies", None)
-                    st.rerun()
-            except youtube.YTError as e:
-                st.error(f"😥 {e}")
-    else:
-        b2.caption("🔒 팀원은 내 유튜브 채널 댓글을 바로 불러와 답글까지 게시할 수 있어요.")
-    if ss.get("yt_threads"):
-        st.caption(f"📺 '{ss.yt_threads['channel']}' 채널에서 불러온 댓글 {len(ss.yt_threads['lines'])}개")
-    ss.setdefault("c_brand", ss.get("in_brand") or "")
-    with st.form("comment_form"):
-        cbrand = st.text_input("브랜드 이름 *", key="c_brand", max_chars=30)
-        cinfo = st.text_input("답글에 참고할 제품 정보 (선택)", max_chars=200,
-                              placeholder="예: 원액 1 : 우유 3 비율 추천, 배송은 평일 기준 2~3일")
-        raw = st.text_area("댓글 목록 *", key="comments_in", height=160, max_chars=3000)
-        go = st.form_submit_button("🤖 AI로 분류하고 답글 쓰기", type="primary", width="stretch")
-
-    if go:
-        comments = [c.strip() for c in raw.splitlines() if c.strip()][:MAX_COMMENTS]
-        if not cbrand.strip() or not comments:
-            st.error("브랜드 이름과 댓글을 1개 이상 입력해 주세요.")
-        elif allow_call():
-            masked = [checks.mask_personal(c) for c in comments]  # 개인정보는 가리고 AI에 보냄
-            if masked != comments:
-                st.info("댓글 속 전화번호·이메일 등은 가린 뒤 AI에 보냈어요.")
-            linked = bool(ss.get("yt_threads")) and comments == ss.yt_threads["lines"]
-            with st.spinner("AI가 댓글을 읽고 있어요..."):
-                try:
-                    data, model = ai.generate_json(prompts.COMMENT_SYSTEM,
-                                                   prompts.comment_prompt(cbrand, tone, cinfo, banned, masked),
-                                                   ["items"], temperature=0.4)
-                    ss.replies = {"items": checks.enforce_comment_rules(data.get("items", []), masked, banned),
-                                  "model": model, "threads": ss.yt_threads["threads"] if linked else None}
-                except ai.AIError as e:
-                    ss.pop("replies", None)
-                    show_ai_error(e)
-
-    if "replies" in ss:
-        items = ss.replies["items"]
-        icon = {"문의": "❓", "칭찬": "😊", "불만": "⚠️", "민감": "🚫", "스팸": "🗑️"}
-        counts = {c: sum(1 for it in items if it["category"] == c) for c in checks.CATEGORIES}
-        st.divider()
-        # 휴대폰에서도 한 줄로 보이도록 표 대신 배지로 표시
-        st.markdown("  ".join(f"**{icon[c]} {c} {counts[c]}**" for c in checks.CATEGORIES))
-        for n, it in enumerate(items, 1):
-            with st.container(border=True):
-                st.markdown(f"**{icon[it['category']]} {it['category']}** · {it['comment']}")
-                if it["reason"]:
-                    st.caption(f"분류 이유: {it['reason']}")
-                threads = ss.replies.get("threads") or []
-                th = threads[n - 1] if n - 1 < len(threads) else None
-                if it["category"] in checks.NEED_HUMAN:
-                    st.warning(human_notice(it))
-                    if th and ss.team_ok:  # AI 초안 없이 사람이 직접 쓴 답만 게시
-                        with st.expander("✍️ 직접 답글 쓰기 (AI 초안 없음)"):
-                            text = st.text_area("답글", "", key=f"human_{n}", height=80,
-                                                placeholder="담당자가 직접 판단해서 쓰는 답글이에요.")
-                            post_reply(n, th, text, banned)
-                elif it["category"] == "스팸":
-                    st.caption("답글을 달지 않아요. 플랫폼에서 숨김·신고를 권장해요.")
-                else:
-                    text = st.text_area("답글 초안", it["reply"], key=f"reply_{n}", height=80)
-                    if th and ss.team_ok:
-                        post_reply(n, th, text, banned)
-                for note in it["notes"]:
-                    st.caption(f"⚠️ {note}")
-        st.caption(f"생성 모델: {ss.replies['model']} · 답글은 꼭 확인한 뒤 게시하세요.")
+    ct_yt, ct_ig = st.tabs(["📺 유튜브 댓글", "📸 인스타 댓글"])
+    with ct_yt:
+        comment_panel("yt")
+    with ct_ig:
+        comment_panel("ig")
 
 # ───────── 탭 3: 안내 ─────────
 with tab3:
