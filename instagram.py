@@ -160,3 +160,17 @@ def recent_comments(limit=15, posts=10):
 
 def reply(comment_id, text):
     _call("POST", f"{comment_id}/replies", message=text[:2200])
+
+
+def recent_stats(limit=5):
+    """최근 게시물의 좋아요·댓글 수 (조회수는 인사이트 권한이 따로 필요해 제외)"""
+    acct = account()
+    res = _call("GET", f"{acct['id']}/media", fields="caption,permalink,timestamp,like_count,comments_count,media_type",
+                limit=limit)
+    out = []
+    for m in res.get("data", []):
+        cap = " ".join((m.get("caption") or "").split())
+        out.append({"title": cap[:40] + ("…" if len(cap) > 40 else ""), "date": (m.get("timestamp") or "")[:10],
+                    "likes": int(m.get("like_count") or 0), "comments": int(m.get("comments_count") or 0),
+                    "url": m.get("permalink", "")})
+    return out, acct

@@ -127,3 +127,23 @@ def reply(yt, thread_id, text):
         yt.comments().insert(part="snippet", body={"snippet": {"parentId": thread_id, "textOriginal": text}}).execute()
     except HttpError as e:
         raise _http_error(e)
+
+
+def recent_stats(yt, ch, limit=5):
+    """채널에 최근 올린 영상의 조회수·좋아요·댓글 수"""
+    from googleapiclient.errors import HttpError
+    try:
+        pl = yt.playlistItems().list(part="contentDetails", playlistId=ch["uploads"], maxResults=limit).execute()
+        ids = [i["contentDetails"]["videoId"] for i in pl.get("items", [])]
+        if not ids:
+            return []
+        vids = yt.videos().list(part="snippet,statistics", id=",".join(ids)).execute().get("items", [])
+    except HttpError as e:
+        raise _http_error(e)
+    out = []
+    for v in vids:
+        st_ = v.get("statistics", {})
+        out.append({"title": v["snippet"]["title"], "date": v["snippet"].get("publishedAt", "")[:10],
+                    "views": int(st_.get("viewCount", 0)), "likes": int(st_.get("likeCount", 0)),
+                    "comments": int(st_.get("commentCount", 0)), "url": f"https://youtu.be/{v['id']}"})
+    return out

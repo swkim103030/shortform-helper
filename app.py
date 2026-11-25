@@ -38,11 +38,13 @@ SAMPLE = {
     "brand": "하루빈 커피", "name": "콜드브루 원액 500ml", "category": "커피", "price": "12,900원",
     "features": "18시간 저온 추출\n물이나 우유에 타기만 하면 완성\n냉장 2주 보관",
     "target": "아침마다 바쁜 직장인", "event": "첫 구매 10% 할인",
+    "store": "망원역 2번 출구 도보 3분, 매일 8:00~21:00 영업, 주차는 어려워요",
 }
 SAMPLE_COMMENTS = """우유랑 몇 대 몇으로 섞어요?
 아침에 한 잔씩 마시는데 진짜 편해요!
 주문한 지 일주일 넘었는데 아직 안 와요. 환불해 주세요
-구독하고 우리 채널도 놀러오세요 http://spam.example"""
+구독하고 우리 채널도 놀러오세요 http://spam.example
+주말에도 몇 시까지 해요?"""
 
 ss = st.session_state
 ss.setdefault("calls", [])
@@ -176,7 +178,7 @@ def comment_panel(p):
     with st.form(f"{p}_comment_form"):
         cbrand = st.text_input("브랜드 이름 *", key=f"{p}_brand", max_chars=30)
         cinfo = st.text_input("답글에 참고할 제품 정보 (선택)", max_chars=200, key=f"{p}_info",
-                              placeholder="예: 원액 1 : 우유 3 비율 추천, 배송은 평일 기준 2~3일")
+                              placeholder="예: 원액 1 : 우유 3 비율 추천, 택배는 평일 기준 2~3일, 디카페인 메뉴 있음")
         raw = st.text_area("댓글 목록 *", key=f"{p}_comments_in", height=160, max_chars=3000)
         go = st.form_submit_button("🤖 AI로 분류하고 답글 쓰기", type="primary", width="stretch")
 
@@ -192,7 +194,7 @@ def comment_panel(p):
             with st.spinner("AI가 댓글을 읽고 있어요..."):
                 try:
                     data, model = ai.generate_json(prompts.COMMENT_SYSTEM,
-                                                   prompts.comment_prompt(cbrand, tone, cinfo, banned, masked),
+                                                   prompts.comment_prompt(cbrand, tone, cinfo, banned, masked, store.strip()),
                                                    ["items"], temperature=0.4)
                     ss[f"{p}_replies"] = {"items": checks.enforce_comment_rules(data.get("items", []), masked, banned),
                                           "model": model, "threads": got["threads"] if linked else None}
@@ -247,6 +249,9 @@ with st.sidebar:
     cta = st.text_input("행동 유도 문구", "프로필 링크에서 확인하세요!", max_chars=40)
     banned_raw = st.text_input("금지 표현 (쉼표로 구분)", "최고, 1등, 무조건, 완벽", max_chars=200)
     banned = [w.strip() for w in banned_raw.split(",") if w.strip()]
+    store = st.text_area("매장 정보 (선택)", key="in_store", max_chars=150, height=80,
+                         placeholder="예: 망원역 2번 출구 도보 3분, 매일 8:00~21:00, 주차 불가",
+                         help="위치·영업시간을 적으면 대본 마지막에 방문 안내를 넣고, 댓글의 영업시간·위치 질문에도 이 내용으로 답해요.")
     st.subheader("영상 설정")
     k1, k2 = st.columns(2)
     color_main = k1.color_picker("배경색", "#6B3E26")
@@ -311,7 +316,7 @@ if ss.get("script"):
             _done = 4
 st.markdown(ui.hero(_done), unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["📝 쇼츠 대본 만들기", "💬 댓글 응대", "ℹ️ 사용 안내"])
+tab1, tab2, tab4, tab3 = st.tabs(["📝 쇼츠 대본 만들기", "💬 댓글 응대", "📊 올린 영상 성과", "ℹ️ 사용 안내"])
 
 # ───────── 탭 1: 쇼츠 대본 ─────────
 with tab1:
@@ -333,7 +338,7 @@ with tab1:
 
     if submitted:
         feats = [f.strip() for f in features.splitlines() if f.strip()]
-        user_text = " ".join([brand, name, category, price, *feats, target, event])
+        user_text = " ".join([brand, name, category, price, *feats, target, event, store])
         if not brand.strip() or not name.strip() or not feats:
             st.error("브랜드 이름, 제품 이름, 특징(1개 이상)은 꼭 입력해 주세요.")
         elif checks.find_personal(user_text):
@@ -343,13 +348,14 @@ with tab1:
             req = dict(brand=brand.strip(), name=name.strip(), category=category.strip() or "제품",
                        price=price.strip() or "미정", features=feats, target=target.strip() or "누구나",
                        event=event.strip(), seconds=seconds, scenes_hint=max(4, seconds // 5),
-                       tone=tone, style=style, banned=banned, cta=cta.strip())
+                       tone=tone, style=style, banned=banned, cta=cta.strip(), store=store.strip())
             with st.spinner("AI가 대본을 쓰고 있어요... (10~20초)"):
+                t0 = time.time()
                 try:
                     data, model = ai.generate_json(prompts.SCRIPT_SYSTEM, prompts.script_prompt(req),
                                                    ["titles", "scenes", "description", "hashtags", "instagram"])
                     ss.script = {"data": data, "model": model, "req": req, "id": int(time.time() * 1000),
-                                 "user_text": f"{user_text} {seconds}초",
+                                 "user_text": f"{user_text} {seconds}초", "elapsed": time.time() - t0,
                                  "check": checks.check_script(data, f"{user_text} {seconds}초", banned, seconds)}
                     st.rerun()  # 맨 위 단계 표시·미리보기 화면을 새 대본으로 바꾼다
                 except ai.AIError as e:
@@ -413,7 +419,8 @@ with tab1:
         d1.download_button("⬇️ 텍스트로 받기", txt, file_name=f"{req['name']}_쇼츠대본.txt", width="stretch")
         d2.download_button("⬇️ JSON으로 받기 (자동화 연동용)", json.dumps(final, ensure_ascii=False, indent=2),
                            file_name=f"{req['name']}_script.json", width="stretch")
-        st.caption(f"생성 모델: {ss.script['model']} · 같은 입력도 다시 누르면 다른 결과가 나와요.")
+        st.caption(f"생성 모델: {ss.script['model']} · 대본을 만드는 데 {ss.script.get('elapsed', 0):.0f}초 걸렸어요 · "
+                   "같은 입력도 다시 누르면 다른 결과가 나와요.")
 
         # ───── 영상 만들기 ─────
         _music = ("내 음악" if music_file else music_name)
@@ -490,7 +497,8 @@ with tab1:
                 st.metric("장면 수", info["scenes"])
                 if info.get("photo_scenes"):
                     st.caption(f"📷 내 사진·영상 {info['photo_scenes']}개 장면 사용")
-                st.caption(f"만드는 데 {info['elapsed']:.0f}초 걸렸어요.")
+                total = ss.script.get("elapsed", 0) + info["elapsed"]
+                st.caption(f"만드는 데 {info['elapsed']:.0f}초 걸렸어요. (대본부터 영상까지 약 {total / 60:.1f}분)")
                 if info.get("credits"):
                     names = ", ".join(dict.fromkeys(c["author"] for c in info["credits"] if c["author"]))
                     src = ", ".join(dict.fromkeys(c.get("source", "") for c in info["credits"]))
@@ -605,6 +613,40 @@ with tab2:
     with ct_ig:
         comment_panel("ig")
 
+# ───────── 탭 4: 성과 ─────────
+with tab4:
+    st.markdown(ui.section("📊", "올린 영상 성과", "최근 올린 영상의 반응을 한곳에서 봐요. 어떤 영상이 반응이 좋은지 보고 다음 쇼츠에 반영하세요.",
+                           [("유튜브 조회수·좋아요·댓글", True), ("인스타 좋아요·댓글", True)], first=True),
+                unsafe_allow_html=True)
+    if not ss.team_ok:
+        st.caption("🔒 팀 비밀번호를 넣으면 내 채널의 성과를 볼 수 있어요.")
+    elif st.button("🔄 최근 영상 성과 불러오기", width="stretch"):
+        rows = []
+        if youtube.configured():
+            try:
+                with st.spinner("유튜브 성과를 불러오는 중..."):
+                    yt = youtube.client()
+                    rows += [dict(r, platform="📺 유튜브") for r in youtube.recent_stats(yt, youtube.channel(yt))]
+            except youtube.YTError as e:
+                st.error(f"유튜브: {e}")
+        if instagram.configured():
+            try:
+                with st.spinner("인스타 성과를 불러오는 중..."):
+                    rows += [dict(r, platform="📸 인스타", views=None) for r in instagram.recent_stats()[0]]
+            except instagram.IGError as e:
+                st.error(f"인스타: {e}")
+        ss.stats = sorted(rows, key=lambda r: r["date"], reverse=True)
+    if ss.get("stats"):
+        st.dataframe([{"플랫폼": r["platform"], "날짜": r["date"], "제목·캡션": r["title"],
+                       "조회수": r.get("views"), "좋아요": r["likes"], "댓글": r["comments"], "링크": r["url"]}
+                      for r in ss.stats], hide_index=True, width="stretch",
+                     column_config={"링크": st.column_config.LinkColumn(display_text="열기"),
+                                    "조회수": st.column_config.NumberColumn(help="인스타 조회수는 인사이트 권한이 있어야 볼 수 있어요.")})
+        best = max(ss.stats, key=lambda r: (r["likes"] + r["comments"]))
+        st.caption(f"👍 반응이 가장 좋은 영상: {best['platform']} '{best['title']}' (좋아요 {best['likes']} · 댓글 {best['comments']})")
+    elif ss.team_ok:
+        st.caption("버튼을 누르면 유튜브·인스타에 최근 올린 영상 5개씩의 반응을 불러와요.")
+
 # ───────── 탭 3: 안내 ─────────
 with tab3:
     st.markdown("""
@@ -615,7 +657,9 @@ with tab3:
 - **쇼츠 대본:** 장면별 화면 문구와 나레이션, 제목 후보, 설명란, 해시태그, 인스타 글
 - **쇼츠 영상:** 고친 대본에 AI 음성과 움직이는 자막을 입혀 mp4로 만들어요. 배경은 무료 스톡 영상이나 **내 제품 사진·영상**을 쓰고, **직접 합성한 배경음악**을 깔아요
 - **유튜브·인스타 업로드 (팀원):** 사람이 확인 칸에 체크해야만 올라가요. 설명란·캡션에 AI 제작 사실을 적어요
-- **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 채널 댓글을 불러와 확인 후 게시
+- **댓글 응대:** 문의·칭찬·불만·민감·스팸 분류와 답글 초안. 팀원은 유튜브·인스타 댓글을 불러와 확인 후 게시
+- **성과 확인:** 최근 올린 영상의 조회수·좋아요·댓글을 한 표로 비교
+- **매장 정보:** 위치·영업시간을 적으면 대본에 방문 안내를 넣고, 댓글 질문에도 그대로 답해요
 - **자동 검사:** 금지 표현, 효능·과장 표현, 입력에 없는 숫자(AI가 지어낸 수치일 가능성)
 
 ### 안전장치

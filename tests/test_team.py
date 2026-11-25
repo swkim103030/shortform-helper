@@ -32,6 +32,8 @@ instagram.publish_reel = _ig
 IG_THREADS = [{"thread_id": "C1", "author": "coffee_lover", "text": "원액 하나로 몇 잔 나와요?", "permalink": ""},
               {"thread_id": "C2", "author": "spam_bot", "text": "팔로우하면 선물 드려요 http://spam.example", "permalink": ""}]
 instagram.recent_comments = lambda limit=15: (IG_THREADS, {"id": "1", "username": "jongbbu"})
+youtube.recent_stats = lambda yt, ch, limit=5: [{"title": "콜드브루 쇼츠", "date": "2026-11-25", "views": 120, "likes": 9, "comments": 2, "url": "https://youtu.be/X"}]
+instagram.recent_stats = lambda limit=5: ([{"title": "릴스 캡션", "date": "2026-11-24", "likes": 15, "comments": 3, "url": "https://ig/R"}], {"username": "jongbbu"})
 instagram.reply = lambda cid, text: LOG.append(("ig_reply", cid, text[:15]))
 
 def new(pw=True):
@@ -120,3 +122,16 @@ print("   인스타 게시 버튼:", ig_posts, "| 작성자 표시:", any("@coff
 if ig_posts:
     [b for b in at.button if b.key == ig_posts[0]][0].click().run()
 print("== 인스타 답글 게시:", LOG, "| 성공:", [o for o in texts(at)["ok"] if "인스타" in o])
+
+# 10) 성과 탭
+at = new(); at.text_input[[t.label for t in at.text_input].index("팀 비밀번호")].set_value("team1234").run()
+click(at, "최근 영상 성과 불러오기"); assert not at.exception, at.exception
+df = at.dataframe[0].value if at.dataframe else None
+print("== 성과 표:", None if df is None else df[["플랫폼", "조회수", "좋아요"]].values.tolist(),
+      "| 최고:", [c.value for c in at.caption if "반응이 가장" in c.value])
+# 11) 매장 정보 → 프롬프트 반영
+import prompts
+p = prompts.script_prompt(dict(brand="b", name="n", category="c", price="1원", features=["f"], target="t", event="",
+                               seconds=30, scenes_hint=6, tone=list(prompts.TONES)[0], style=list(prompts.STYLES)[0],
+                               banned=[], cta="x", store="망원역 2번 출구"))
+print("== 매장 정보 프롬프트:", "망원역 2번 출구" in p, "| 댓글:", "망원역" in prompts.comment_prompt("b", list(prompts.TONES)[0], "", [], ["몇 시까지?"], "망원역"))

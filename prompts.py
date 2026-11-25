@@ -29,6 +29,8 @@ def script_prompt(p):
         "브랜드": p["brand"], "제품명": p["name"], "종류": p["category"], "가격": p["price"],
         "특징": p["features"], "추천 대상": p["target"], "이벤트": p["event"] or "없음",
     }
+    if p.get("store"):
+        info["매장 정보"] = p["store"]
     return f"""아래 제품으로 유튜브 쇼츠 대본을 만들어 주세요.
 
 [제품 정보]
@@ -40,6 +42,7 @@ def script_prompt(p):
 - 구성 방식: {STYLES[p['style']]}
 - 금지 표현: {', '.join(p['banned']) or '없음'}
 - 마지막 장면에는 가격(또는 이벤트)과 행동 유도 문구 "{p['cta']}"를 넣는다.
+- 매장 정보가 있으면 마지막 장면 나레이션과 설명란·인스타 글에 위치나 영업시간을 그대로 한 번 넣어 방문을 유도한다. 매장 정보에 없는 내용은 만들지 않는다.
 
 [JSON 형식]
 {{
@@ -68,11 +71,12 @@ COMMENT_SYSTEM = """당신은 브랜드 유튜브 채널의 댓글 응대 담당
 5. 결과는 지정한 JSON 형식으로만 답한다."""
 
 
-def comment_prompt(brand, tone, product_info, banned, comments):
+def comment_prompt(brand, tone, product_info, banned, comments, store=""):
     numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(comments))
     return f"""[브랜드] {brand}
 [말투] {TONES[tone]}
 [참고할 제품 정보] {product_info or '없음'}
+[매장 정보] {store or '없음'} (영업시간·위치·주차 질문은 여기 적힌 내용으로만 답하고, 없으면 확인 후 안내하겠다고 답한다)
 [금지 표현] {', '.join(banned) or '없음'}
 
 [댓글 목록]
